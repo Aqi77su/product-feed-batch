@@ -33,7 +33,7 @@
 
 日常不问 draft_root；工具从剪映配置和存在的默认目录探测，环境报告应显示选中目录及候选。多个候选时 AI 根据实际配置来源判断，不能随意选旧目录。`PFB_DRAFT_ROOT` 或 job 的 `draft_root` 仅用于检测失败后的显式环境适配/隔离测试，不作为日常用户问题。
 
-基础字体/音乐由 catalog 决定，不设置时分别使用后端默认字体/无音乐，并显式说明。指定资源把对应候选列表缩成一项即可。`settings` 支持字段见 presets/defaults.json；`main_transform` 和 `broll_transform` 用剪映 ClipSettings 坐标，正 y 向上，范围通常 -1 到 1。图层缩放是素材相对于工程尺寸的显示缩放；首轮必须检查实际画幅是否覆盖预期区域。
+基础字体/音乐优先用户默认清单；没有显式 catalog 时定位得意黑/俪金黑及常用音乐，字体找不到则要求确认替代，不从全池随机。没有音乐则在确认清单说明。指定资源把对应候选列表缩成一项即可。`settings` 支持字段见 presets/defaults.json；`main_transform` 和 `broll_transform` 用剪映 ClipSettings 坐标，正 y 向上，范围通常 -1 到 1。图层缩放是素材相对于工程尺寸的显示缩放；首轮必须检查实际画幅是否覆盖预期区域。
 
 背景支持：`{"mode":"none"}`、`{"mode":"blur"}`、`{"mode":"image","path":"绝对路径"}`。image 背景在主画面下方，主画面默认全屏会遮住背景，需相应缩小 main_transform。无自动抠像；第一版未实现从数字人首帧自动生成背景，若用户要求可先通过 frames 导出一帧再传 image。
 
@@ -85,3 +85,7 @@ job.subtitles 为 `source_id → corrected.json 绝对路径`。标题可在 tit
 工具失败返回非零退出码和 JSON error。部分 backend 自带日志可能和最终 JSON 同时出现，读取末尾结果或任务 status.json。默认端口随机分配并只监听回环；完成/失败后保留 5 秒查询窗，然后关闭，可继续读 status.json。
 
 失败草稿保留 INCOMPLETE.json 和已生成文件供诊断，不覆盖、不自动删除。选择新名称重试；字幕成功缓存可复用，但第一版不是从任意半截草稿续写。所选素材/规则种子可复现，不承诺 UUID 相同。
+
+## v0.2 模式与参数
+
+使用 [assembly.md](assembly.md) 的 scripts/assembly 配置。detect-mode --job job.json --work task-dir --out mode-proposal.json 提出分组供用户确认。默认 count 模式每条1段实拍；ratio模式单独启用。音乐不循环时按整个成片时长筛选，长度不足默认reject。

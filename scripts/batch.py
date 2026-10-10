@@ -6,6 +6,8 @@ import hashlib
 import importlib.util
 import json
 import math
+import difflib
+import copy
 import os
 from pathlib import Path
 import random
@@ -249,6 +251,12 @@ def resources():
         walk(o)
     for k in ('music', 'fonts'):
         found[k] = list({x['path']: x for x in found[k]}.values())
+    try:
+        from PIL import ImageFont
+        for font in found['fonts']:
+            try: font['name']=' '.join(ImageFont.truetype(font['path'],16).getname())
+            except Exception: pass
+    except ImportError: pass
     return {**found, 'missing_records': missing_records, 'unreadable_recent_drafts': encrypted,
             'note': '缓存存在不等于商用授权；效果必须另行验证，不自动进入随机集合'}
 
@@ -282,6 +290,12 @@ def job_settings(job):
     if settings['background']['mode'] not in ('none', 'blur', 'image'): raise ValueError('background.mode')
     if settings['background']['mode'] == 'image' and not Path(settings['background']['path']).is_file():
         raise ValueError('background image missing')
+    if settings['broll_mode'] not in ('count','ratio'):raise ValueError('broll_mode')
+    if settings['broll_boundary_policy'] not in ('allow','prefer_cover','within_segment'):raise ValueError('broll_boundary_policy')
+    if settings['music_short_policy'] not in ('reject','allow_silence'):raise ValueError('music_short_policy')
+    if not 0<=settings['subtitle_border_width']<=100:raise ValueError('subtitle_border_width')
+    if settings['music_source_start_s']<0 or min(settings['music_fade_in_s'],settings['music_fade_out_s'])<0:raise ValueError('music timing')
+    if len(settings['broll_count'])!=2 or any(not isinstance(x,int) or x<0 for x in settings['broll_count']) or settings['broll_count'][0]>settings['broll_count'][1]:raise ValueError('broll_count')
     return settings
 
 
@@ -320,9 +334,18 @@ def inventory(job):
         elif x.get('kind') != 'text' or not x.get('text'): raise ValueError('overlay needs image path or text')
     ref = probe(job['reference_video']) if job.get('reference_video') else None
     catalog = read(job['resource_catalog']) if job.get('resource_catalog') else read(ROOT / 'presets/resources.json')
+    if not job.get('resource_catalog'):
+        discovered=resources(); preferred=read(ROOT/'presets/preferred-resources.json')
+        def canonical(value): return ''.join(c.lower() for c in value if c.isalnum())
+        for key in ('music','fonts'):
+            wanted=[canonical(x) for x in preferred[key]]
+            catalog[key]=[x for x in discovered[key] if any(name in canonical(x['name']) for name in wanted)]
+        if not catalog['fonts']:
+            raise ValueError('默认得意黑/俪金黑未定位；请确认安装字体或指定替代 catalog，不从全字体池随机')
     for k in ('music', 'fonts', 'sfx'):
         for x in catalog.get(k, []):
             if not Path(x['path']).is_file(): errors.append({'path': x['path'], 'error': 'catalog resource missing'})
+            elif k in ('music','sfx'): x['duration_ms']=probe(x['path'])['duration_ms']
     d = discover()
     draft_root = job.get('draft_root') or d['draft_root']
     warnings = []
@@ -331,7 +354,7 @@ def inventory(job):
     if not catalog.get('music'): warnings.append('No BGM candidate; batch will have no BGM')
     if not catalog.get('fonts'): warnings.append('No specified font; backend default font (unverified display)')
     if not broll: warnings.append('No product footage; talking-head only')
-    return {'main': rows, 'broll': broll, 'count': count, 'distribution': distribution, 'overlays': overlays,
+    return {'assembly': job.get('assembly'), 'main': rows, 'broll': broll, 'count': count, 'distribution': distribution, 'overlays': overlays,
             'reference': ref, 'draft_root': draft_root, 'settings': settings, 'errors': errors, 'warnings': warnings,
             'estimated_timeline_s': sum(x['duration_ms'] * distribution[x['id']] for x in rows) / 1000,
             'source_bytes': sum(Path(x['path']).stat().st_size for x in rows + broll), 'catalog': catalog}
@@ -442,10 +465,18 @@ def validate_job(job):
     if inv['errors']: raise ValueError(json.dumps(inv['errors'], ensure_ascii=False))
     verify_catalog(inv['catalog'])
     for x in inv['main']:
-        if inv['distribution'][x['id']] == 0: continue
+        if not inv.get('assembly') and inv['distribution'][x['id']] == 0: continue
         p = job.get('subtitles', {}).get(x['id'])
         if not p: raise ValueError('Missing corrected subtitles for ' + x['id'])
         validate_subtitles(read(p), x)
+    validate_assembly(inv)
+    if inv.get('assembly'):
+        for group in inv['assembly']['groups']:
+            for section in group['sections']:
+                for source_id in section['sources']:
+                    data=read(job['subtitles'][source_id])
+                    if data.get('script_id')!=group['script_id'] or data.get('section_id')!=section['section_id']:
+                        raise ValueError('Corrected subtitle script_id/section_id differ from confirmed assembly: '+source_id)
     return inv
 
 
@@ -453,36 +484,130 @@ def choice(rng, catalog, key):
     a = catalog.get(key, []); return rng.choice(a) if a else None
 
 
-def plan(inv):
-    settings = inv['settings']; catalog = inv['catalog']; items = []; offset = 0; number = 0
+def validate_assembly(inv):
+    assembly = inv.get('assembly')
+    if not assembly: return
+    if assembly.get('confirmed') is not True: raise ValueError('Assembly mode/groups require user confirmation')
+    known = {x['id'] for x in inv['main']}
+    if assembly.get('mode') != 'splice': raise ValueError('assembly.mode must be splice; omit for single mode')
+    groups = assembly.get('groups', [])
+    if not groups: raise ValueError('No assembly script groups')
+    if sum(g['count'] for g in groups) != inv['count']: raise ValueError('Script group counts must sum to total count')
+    for g in groups:
+        sections = g.get('sections', [])
+        if not sections or not g.get('script_id'): raise ValueError('Missing script/sections')
+        previous = 0
+        for section in sections:
+            ids = section.get('sources', [])
+            if not ids or len(set(ids)) != len(ids) or not set(ids) <= known: raise ValueError('Invalid section source pool')
+            if section['char_start'] != previous or section['char_end'] <= previous: raise ValueError('Section gap/overlap')
+            previous = section['char_end']
+        if previous != g['script_length']: raise ValueError('Sections must cover complete normalized script')
+        pool = math.prod(len(x['sources']) for x in sections)
+        if g['count'] > pool and not assembly.get('allow_duplicate_combinations', False):
+            raise ValueError(f'Request {g["count"]} exceeds combination pool {pool}; confirm duplicates explicitly')
+
+
+def normalize_script(value):
+    return ''.join(c.lower() for c in value if c.isalnum())
+
+
+def detect_mode(job, work):
+    inv = inventory(job); scripts = job.get('scripts', [])
+    if not scripts: raise ValueError('Provide AI-parsed scripts [{id,text}] for mode detection')
+    mappings=[]
     for source in inv['main']:
-        for variant in range(inv['distribution'][source['id']]):
-            number += 1
-            seed = hashlib.sha256(f"{settings['seed']}:{source['id']}:{variant}".encode()).hexdigest()
-            rng = random.Random(seed); duration = source['duration_ms']
-            left = min(duration, round(settings['opening_no_broll_s']*1000))
-            right = max(left, duration-round(settings['ending_no_broll_s']*1000))
-            target = min(right-left, round(duration*rng.uniform(*settings['broll_ratio'])))
-            broll = []; position = left; total = 0; previous = None
-            while inv['broll'] and position < right and total < target:
-                position += round(rng.uniform(*settings['broll_gap_s'])*1000)
-                candidates = [x for x in inv['broll'] if x['id'] != previous] or inv['broll']
-                footage = rng.choice(candidates)
-                length = min(round(rng.uniform(*settings['broll_duration_s'])*1000),
-                             footage['duration_ms'], right-position, target-total)
-                if length < 400: break
-                start = rng.randint(0, max(0, footage['duration_ms']-length))
-                broll.append({'asset_id': footage['id'], 'path': footage['path'], 'start_ms': position,
-                              'duration_ms': length, 'source_start_ms': start,
-                              'intro': choice(rng, catalog, 'video_intro'), 'outro': choice(rng, catalog, 'video_outro')})
-                previous = footage['id']; total += length; position += length
-            items.append({'number': number, 'source_id': source['id'], 'source_path': source['path'],
-                          'variant': variant+1, 'seed': seed, 'start_ms': offset, 'duration_ms': duration,
-                          'broll': broll, 'music': choice(rng, catalog, 'music'), 'font': choice(rng, catalog, 'fonts'),
-                          'effective_broll_ratio': round(total/duration, 4),
-                          'target_broll_ratio': round(target/duration, 4)})
-            offset += duration
-    return {'items': items, 'duration_ms': offset, 'settings': settings, 'warnings': inv['warnings']}
+        path=job.get('subtitles',{}).get(source['id']) or str(Path(work)/'subtitles'/(source['id']+'.raw.json'))
+        data=read(path); text=normalize_script(''.join(c['text'] for c in data['cues']))
+        candidates=[]
+        for script in scripts:
+            full=normalize_script(script['text'])
+            matcher=difflib.SequenceMatcher(None,text,full,autojunk=False)
+            blocks=[x for x in matcher.get_matching_blocks() if x.size]
+            if not blocks: continue
+            start=blocks[0].b; end=blocks[-1].b+blocks[-1].size
+            span=full[start:end]
+            similarity=difflib.SequenceMatcher(None,text,span,autojunk=False).ratio()
+            matched=sum(x.size for x in blocks)/max(1,len(text))
+            candidates.append({'script_id':script['id'],'char_start':start,'char_end':end,'script_length':len(full),
+                               'confidence':round(min(similarity,matched),4),'coverage':round((end-start)/max(1,len(full)),4),
+                               'differences':[] if text==span else ['ASR/script differ; inspect omissions/repeats before confirmation']})
+        candidates.sort(key=lambda x:x['confidence'],reverse=True)
+        best=candidates[0] if candidates else None
+        ambiguous=not best or best['confidence']<.8 or (len(candidates)>1 and candidates[0]['confidence']-candidates[1]['confidence']<.05)
+        mappings.append({'source_id':source['id'],'uncertain':ambiguous,'match':best,'alternatives':candidates[1:3]})
+    suggestions=[]
+    for script in scripts:
+        matches=[x for x in mappings if x['match'] and x['match']['script_id']==script['id']]
+        length=len(normalize_script(script['text']))
+        sections={}
+        for x in matches:
+            m=x['match']; sections.setdefault((m['char_start'],m['char_end']),[]).append(x['source_id'])
+        ordered=[{'section_id':f'section_{i+1}','char_start':a,'char_end':b,'sources':ids} for i,((a,b),ids) in enumerate(sorted(sections.items()))]
+        complete=ordered and ordered[0]['char_start']==0 and ordered[-1]['char_end']==length and all(a['char_end']==b['char_start'] for a,b in zip(ordered,ordered[1:]))
+        full=bool(matches) and all(x['match']['coverage']>=.95 for x in matches)
+        mode='uncertain' if any(x['uncertain'] for x in matches) or not matches else 'single' if full else 'splice' if complete else 'uncertain'
+        suggestions.append({'script_id':script['id'],'mode':mode,'script_length':length,'sections':ordered,
+                            'combination_pool':math.prod(len(x['sources']) for x in ordered) if mode=='splice' else None})
+    return {'requires_user_confirmation':True,'mappings':mappings,'scripts':suggestions,
+            'note':'Proposal only. AI resolves script variants/repeated phrases and records confirmed section groups; no automatic production.'}
+
+
+def plan(inv):
+    settings=inv['settings']; catalog=inv['catalog']; source_map={x['id']:x for x in inv['main']}; units=[]
+    assembly=inv.get('assembly'); master=random.Random(settings['seed'])
+    if assembly:
+        validate_assembly(inv)
+        for group in assembly['groups']:
+            sizes=[len(s['sources']) for s in group['sections']]; pool=math.prod(sizes)
+            indices=master.sample(range(pool),min(group['count'],pool))
+            indices += [master.randrange(pool) for _ in range(group['count']-len(indices))]
+            for index in indices:
+                cursor=index; selected=[]
+                for section,size in reversed(list(zip(group['sections'],sizes))):
+                    selected.append(section['sources'][cursor%size]); cursor//=size
+                units.append((group['script_id'],list(reversed(selected)),index))
+    else:
+        for source in inv['main']:
+            for variant in range(inv['distribution'][source['id']]): units.append((source['id'],[source['id']],variant))
+    items=[]; offset=0
+    for number,(script_id,ids,combination) in enumerate(units,1):
+        seed=hashlib.sha256(f"{settings['seed']}:{script_id}:{combination}:{number}".encode()).hexdigest(); rng=random.Random(seed)
+        segments=[]; duration=0
+        for source_id in ids:
+            source=source_map[source_id]; segments.append({'source_id':source_id,'path':source['path'],'start_ms':duration,'duration_ms':source['duration_ms']}); duration+=source['duration_ms']
+        left=min(duration,round(settings['opening_no_broll_s']*1000));right=max(left,duration-round(settings['ending_no_broll_s']*1000))
+        broll=[];total=0;previous=None; boundaries=[x['start_ms'] for x in segments[1:]]
+        target=min(right-left,round(duration*rng.uniform(*settings['broll_ratio'])))
+        requested=rng.randint(*settings['broll_count']) if settings['broll_mode']=='count' else 10000
+        attempts=0
+        while len(broll)<requested and attempts<200 and (settings['broll_mode']=='count' or total<target):
+            attempts+=1
+            candidates=[x for x in inv['broll'] if x['id']!=previous and (x['duration_ms']>=settings['broll_duration_s'][0]*1000 or settings['broll_short_policy']=='allow')]
+            if not candidates: break
+            footage=rng.choice(candidates);length=min(round(rng.uniform(*settings['broll_duration_s'])*1000),footage['duration_ms'],right-left)
+            if settings['broll_mode']=='ratio':length=min(length,target-total)
+            if length<400:break
+            if length<settings['broll_duration_s'][0]*1000 and settings['broll_short_policy']=='skip':break
+            position=rng.randint(left,max(left,right-length))
+            if settings['broll_boundary_policy']=='prefer_cover' and boundaries:
+                boundary=rng.choice(boundaries);position=max(left,min(right-length,boundary-length//2))
+            if settings['broll_boundary_policy']=='within_segment' and any(position<b<position+length for b in boundaries):continue
+            if any(position<b['start_ms']+b['duration_ms']+settings['broll_gap_s'][0]*1000 and position+length+settings['broll_gap_s'][0]*1000>b['start_ms'] for b in broll):continue
+            broll.append({'asset_id':footage['id'],'path':footage['path'],'start_ms':position,'duration_ms':length,
+                          'source_start_ms':rng.randint(0,footage['duration_ms']-length),'intro':choice(rng,catalog,'video_intro'),'outro':choice(rng,catalog,'video_outro')})
+            total+=length;previous=footage['id']
+        broll.sort(key=lambda x:x['start_ms'])
+        music_pool=catalog.get('music',[])
+        if not settings['music_loop'] and settings['music_short_policy']=='reject':
+            music_pool=[x for x in music_pool if x['duration_ms']-settings['music_source_start_s']*1000>=duration]
+            if catalog.get('music') and not music_pool:raise ValueError(f'No sufficiently long BGM for output {number}; choose short policy or longer music')
+        items.append({'number':number,'script_id':script_id,'source_id':ids[0],'source_path':segments[0]['path'],
+                      'segments':segments,'combination_index':combination,'variant':number,'seed':seed,'start_ms':offset,'duration_ms':duration,
+                      'broll':broll,'music':rng.choice(music_pool) if music_pool else None,'font':choice(rng,catalog,'fonts'),
+                      'effective_broll_ratio':round(total/duration,4),'requested_broll_count':requested if settings['broll_mode']=='count' else None})
+        offset+=duration
+    return {'items':items,'duration_ms':offset,'settings':settings,'warnings':inv['warnings']}
 
 
 class Status:
@@ -561,7 +686,7 @@ def build(job, inv, resolved, work, state):
         return draft.AudioSegment(material(path,True),tr(start,length),source_timerange=tr(source_start,length),volume=volume)
     def text(value,start,length,size,y,color,font=None,spans=None):
         seg = draft.TextSegment(value,tr(start,length),style=draft.TextStyle(size=size,color=tuple(color)),
-                                border=draft.TextBorder(width=40),clip_settings=draft.ClipSettings(transform_y=y),
+                                border=draft.TextBorder(width=settings['subtitle_border_width']),clip_settings=draft.ClipSettings(transform_y=y),
                                 rich_spans=spans or [])
         if font:
             if font.get('enum'): seg.font = getattr(draft.FontType,font['enum']).value
@@ -578,16 +703,24 @@ def build(job, inv, resolved, work, state):
                 shutil.copytree(src,dest,dirs_exist_ok=True)
     for item in resolved['items']:
         rng = random.Random(item['seed'] + ':text'); offset=item['start_ms']; duration=item['duration_ms']
-        main = video(item['source_path'],offset,duration,volume=1,clip=settings['main_transform'])
-        if settings['background']['mode']=='blur': main.add_background_filling('blur')
-        script.add_segment(main,'Main')
+        for part in item['segments']:
+            main=video(part['path'],offset+part['start_ms'],part['duration_ms'],volume=1,clip=settings['main_transform'])
+            if settings['background']['mode']=='blur': main.add_background_filling('blur')
+            script.add_segment(main,'Main')
         if settings['background']['mode']=='image':
             script.add_segment(video(settings['background']['path'],offset,duration),'Background')
         for b in item['broll']:
             v=video(b['path'],offset+b['start_ms'],b['duration_ms'],b['source_start_ms'],clip=settings['broll_transform'])
             animate(v,b['intro'],draft.IntroType); animate(v,b['outro'],draft.OutroType)
             script.add_segment(v,'Broll')
-        cues=read(job['subtitles'][item['source_id']])['cues']; previous_sfx_end=offset; text_events=[]
+        cues=[]
+        for part in item['segments']:
+            for original in read(job['subtitles'][part['source_id']])['cues']:
+                c=copy.deepcopy(original); c['id']=part['source_id']+':'+c['id']
+                c['start_ms']+=part['start_ms']; c['end_ms']=min(original['end_ms'],part['duration_ms'])+part['start_ms']
+                for k in c.get('keywords',[]):k['start_ms']+=part['start_ms'];k['end_ms']=min(k['end_ms']+part['start_ms'],c['end_ms'])
+                cues.append(c)
+        previous_sfx_end=offset; text_events=[]
         for c in cues:
             start=offset+c['start_ms']; length=min(c['end_ms'],duration)-c['start_ms']
             spans=[draft.RichTextSpan(k['char_start'],k['char_end'],color=tuple(settings['keyword_color']),bold=True) for k in c.get('keywords',[])]
@@ -618,7 +751,7 @@ def build(job, inv, resolved, work, state):
                         previous_sfx_end=start+n; event['sfx']=effect
             text_events.append(event)
         item['subtitle_events']=text_events
-        title=job.get('titles',{}).get(item['source_id'],job.get('title',''))
+        title=job.get('titles',{}).get(item['script_id'],job.get('titles',{}).get(item['source_id'],job.get('title','')))
         if title: script.add_segment(text(title,offset,duration,settings['title_font_size'],settings['title_y'],[1,1,1],item['font']),'Title')
         for i,o in enumerate(job.get('overlays',[])):
             if o['kind']=='image':
@@ -629,11 +762,16 @@ def build(job, inv, resolved, work, state):
         if item['music']:
             p=item['music']['path']; mat=material(p,True); n=mat.duration//1000
             if n<=0: raise ValueError('BGM zero duration')
-            position=0; item['music_chunks']=[]
+            position=0; item['music_chunks']=[]; source_start=round(settings['music_source_start_s']*1000)
+            if source_start>=n:raise ValueError('Music start exceeds source duration')
             while position<duration:
-                length=min(n,duration-position); seg=audio(p,offset+position,length,volume=settings['music_volume'])
-                seg.add_fade(200000 if position==0 else 0,min(500000,length*1000//3) if position+length==duration else 0)
+                length=min(n-source_start,duration-position); seg=audio(p,offset+position,length,source_start=source_start,volume=settings['music_volume'])
+                fade_in=min(round(settings['music_fade_in_s']*1e6),length*1000//3) if position==0 else 0
+                fade_out=min(round(settings['music_fade_out_s']*1e6),length*1000//3) if position+length==duration else 0
+                if fade_in or fade_out:seg.add_fade(fade_in,fade_out)
                 script.add_segment(seg,'Music'); item['music_chunks'].append({'start_ms':position,'duration_ms':length}); position+=length
+                if not settings['music_loop']:break
+                source_start=0
         state.update('building',completed=item['number'],items=[{'number':x['number'],'source_id':x['source_id'],'start_ms':x['start_ms'],'duration_ms':x['duration_ms']} for x in resolved['items'][:item['number']]])
     # Upstream text segments reference their Speed but do not register it.
     speed_ids={s.global_id for s in script.materials.speeds}
@@ -713,12 +851,13 @@ def verify_draft(directory,resolved=None):
         if t.get('font_path') and not Path(t['font_path']).is_file(): errors.append('Missing font: '+t['font_path'])
     total=resolved['duration_ms']*1000
     main=next((t for t in tracks if t.get('name')=='Main'),None)
-    if not main or len(main['segments'])!=len(resolved['items']): errors.append('Main count mismatch')
+    expected=[(item,part) for item in resolved['items'] for part in item['segments']]
+    if not main or len(main['segments'])!=len(expected): errors.append('Main count mismatch')
     else:
         cursor=0
-        for seg,item in zip(main['segments'],resolved['items']):
+        for seg,(item,part) in zip(main['segments'],expected):
             t=seg['target_timerange']
-            if t['start']!=cursor or t['duration']!=item['duration_ms']*1000: errors.append('Main continuity/duration mismatch')
+            if t['start']!=cursor or t['duration']!=part['duration_ms']*1000:errors.append('Main continuity/duration mismatch')
             cursor+=t['duration']
     material_ids={m['id'] for group in materials.values() if isinstance(group,list) for m in group if isinstance(m,dict) and 'id' in m}
     for track in tracks:
@@ -773,6 +912,7 @@ def main():
     a=sub.add_parser('setup'); a.add_argument('--approved',action='store_true')
     for name in ('inspect','validate','plan'):
         a=sub.add_parser(name); a.add_argument('--job',required=True); a.add_argument('--out',required=True)
+    a=sub.add_parser('detect-mode'); a.add_argument('--job',required=True); a.add_argument('--work',required=True); a.add_argument('--out',required=True)
     a=sub.add_parser('transcribe'); a.add_argument('--job',required=True); a.add_argument('--work',required=True)
     a=sub.add_parser('import-srt'); a.add_argument('--video',required=True); a.add_argument('--srt',required=True); a.add_argument('--out',required=True)
     a=sub.add_parser('frames'); a.add_argument('--video',required=True); a.add_argument('--out',required=True); a.add_argument('--count',type=int,default=8)
@@ -785,6 +925,7 @@ def main():
     elif args.cmd=='inspect': result=inventory(read(args.job))
     elif args.cmd=='validate': result=validate_job(read(args.job))
     elif args.cmd=='plan': result=plan(validate_job(read(args.job)))
+    elif args.cmd=='detect-mode': result=detect_mode(read(args.job),args.work)
     elif args.cmd=='transcribe': result=transcribe(read(args.job),args.work)
     elif args.cmd=='import-srt': result=import_srt(args.video,args.srt,args.out)
     elif args.cmd=='frames': result=frames(args.video,args.out,args.count)

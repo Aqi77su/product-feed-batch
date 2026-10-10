@@ -44,3 +44,7 @@ git clone https://github.com/Aqi77su/product-feed-batch.git "$env:USERPROFILE\.c
 ## 开源许可
 
 自有代码和文档：MIT。内置工程工具含 MIT 与 Apache-2.0 组件；内置字幕工具为 GPL-3.0-only，完整源码与许可证随包保留。各目录许可证分别适用，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。音乐、字体、剪映效果及软件本身的使用权限不由本仓库授予。
+
+## v0.2
+
+支持按完整文案自动提出单人/多段拼接/不确定模式，用户确认段落候选后无放回抽组合；混合批次可按多个脚本组配置。字幕金色字号13、y=-0.39，字体优先得意黑/俪金黑；音乐0.36从头播放、不循环、不淡入淡出；每条默认1段5–15秒实拍。详见 [成片分组与默认风格](references/assembly.md)。资源候选按用户提供清单收录，实际字体、音乐缓存路径与花字类型仍需在本机定位验证。

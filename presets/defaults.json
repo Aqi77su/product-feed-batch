@@ -6,24 +6,70 @@
   "seed": 20261010,
   "opening_no_broll_s": 3,
   "ending_no_broll_s": 3,
-  "broll_ratio": [0.3, 0.5],
-  "broll_duration_s": [2, 4],
-  "broll_gap_s": [2, 5],
-  "base_font_size": 5,
-  "subtitle_y": -0.72,
-  "subtitle_color": [1, 1, 1],
-  "keyword_color": [1, 0.82, 0],
+  "broll_ratio": [
+    0.4,
+    0.5
+  ],
+  "broll_duration_s": [
+    5,
+    15
+  ],
+  "broll_gap_s": [
+    2,
+    5
+  ],
+  "base_font_size": 13,
+  "subtitle_y": -0.39,
+  "subtitle_color": [
+    1,
+    0.87,
+    0
+  ],
+  "keyword_color": [
+    1,
+    0.82,
+    0
+  ],
   "keyword_font_size": 7,
   "keyword_y": -0.5,
   "title_y": 0.78,
   "title_font_size": 7,
-  "music_volume": 0.12,
+  "music_volume": 0.36,
   "sfx_volume": 0.25,
   "sfx_mode": "keywords",
   "sfx_min_gap_s": 1.5,
   "animation_probability": 0.6,
   "keyword_popup_probability": 0.65,
-  "background": {"mode": "none"},
-  "main_transform": {"scale_x": 1, "scale_y": 1, "transform_x": 0, "transform_y": 0},
-  "broll_transform": {"scale_x": 1, "scale_y": 1, "transform_x": 0, "transform_y": 0}
+  "background": {
+    "mode": "none"
+  },
+  "main_transform": {
+    "scale_x": 1,
+    "scale_y": 1,
+    "transform_x": 0,
+    "transform_y": 0
+  },
+  "broll_transform": {
+    "scale_x": 1,
+    "scale_y": 1,
+    "transform_x": 0,
+    "transform_y": 0
+  },
+  "music_loop": false,
+  "music_fade_in_s": 0,
+  "music_fade_out_s": 0,
+  "music_short_policy": "reject",
+  "music_source_start_s": 0,
+  "broll_mode": "count",
+  "broll_count": [
+    1,
+    1
+  ],
+  "broll_short_policy": "skip",
+  "broll_boundary_policy": "prefer_cover",
+  "subtitle_border_width": 40,
+  "preferred_fonts": [
+    "得意黑",
+    "俪金黑"
+  ]
 }

@@ -1,0 +1,16 @@
+{
+  "fonts": ["得意黑", "俪金黑"],
+  "music": ["dual bladed", "Fractured（Slow）", "fate", "Cat keeper（PHONK）", "Drak (Phonk Drum)", "那一刻心动（DJ版）", "Groove（剪辑版）", "suddenly", "free（PHONK）", "让我们自由选择", "半点心(纯享版)", "palm", "Take Me Hand", "sweet and sour", "A Thousand Miles", "YOU", "娃娃（庞克）"],
+  "sfx": ["礼物", "砰拳击声", "仙尘音效", "综艺紧张咚咚声"],
+  "flowers": [
+    {"name":"电商-惊爆价","candidate_id":"7474542699467705625"},
+    {"name":"热卖爆款","candidate_id":"7427384987302890804"},
+    {"name":"电商-推荐","candidate_id":"7508275913117732121"},
+    {"name":"电商-强推","candidate_id":"7603673104270904601"},
+    {"name":"国庆电商促销-降价啦","candidate_id":"7552158187391044888"},
+    {"name":"穿搭-超百搭","candidate_id":"7434560304853290278"},
+    {"name":"体育精神"}, {"name":"电商-超级补贴日"}, {"name":"划重点"},
+    {"name":"营销-爆炸元素放大弹动"}, {"name":"带货-福利来袭"}, {"name":"618-惊喜直降"}
+  ],
+  "note":"用户提供的候选名称/ID；不是已验证 effect_id，必须定位资源类型、缓存和验证版本后进入执行 catalog。音乐清单目前明确给出17首，不虚构其余曲目。"
+}
