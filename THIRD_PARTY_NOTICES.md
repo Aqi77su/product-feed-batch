@@ -1,5 +1,7 @@
 # 依赖来源
 
+vendor/aoguai-crypto/draft_crypto.py 来源 aoguai/pyJianYingDraft，Apache-2.0，原LICENSE随目录保留。该独立模块通过本机剪映videoeditor.dll在子进程解密，不分发DLL。分析只对用户授权的工程副本执行。
+
 本 Skill 自有说明与执行器采用 MIT；见 LICENSE。
 
 vendor/jianying-editor 的 scripts/ 和 data/ 来自 luoluoluo22/jianying-editor-skill，固定提交 `32c56928ded4f9e2c2b80e099dc7abb793d2c30b`，按原 MIT LICENSE 保留。其内置 pyJianYingDraft 遵守 Apache-2.0，许可证保留在 vendor/jianying-editor/scripts/vendor/pyJianYingDraft/LICENSE。本版未修改上游源码。

@@ -32,6 +32,18 @@ def read(path):
     return json.loads(Path(path).read_text(encoding='utf-8-sig'))
 
 
+def load_job(path):
+    job=read(path)
+    if job.get('preset'):
+        preset_path=Path(job['preset']).resolve(); preset=read(preset_path)
+        if preset.get('schema_version')!='1.0':raise ValueError('Unsupported preset schema')
+        job['settings']={**preset.get('settings',{}),**job.get('settings',{})}
+        if not job.get('resource_catalog') and preset.get('resource_catalog'):
+            job['resource_catalog']=str((preset_path.parent/preset['resource_catalog']).resolve())
+        job['preset_name']=preset['name']
+    return job
+
+
 def write(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -922,14 +934,14 @@ def main():
     if args.cmd=='doctor': result=doctor()
     elif args.cmd=='resources': result=resources()
     elif args.cmd=='setup': result=setup(args.approved)
-    elif args.cmd=='inspect': result=inventory(read(args.job))
-    elif args.cmd=='validate': result=validate_job(read(args.job))
-    elif args.cmd=='plan': result=plan(validate_job(read(args.job)))
-    elif args.cmd=='detect-mode': result=detect_mode(read(args.job),args.work)
-    elif args.cmd=='transcribe': result=transcribe(read(args.job),args.work)
+    elif args.cmd=='inspect': result=inventory(load_job(args.job))
+    elif args.cmd=='validate': result=validate_job(load_job(args.job))
+    elif args.cmd=='plan': result=plan(validate_job(load_job(args.job)))
+    elif args.cmd=='detect-mode': result=detect_mode(load_job(args.job),args.work)
+    elif args.cmd=='transcribe': result=transcribe(load_job(args.job),args.work)
     elif args.cmd=='import-srt': result=import_srt(args.video,args.srt,args.out)
     elif args.cmd=='frames': result=frames(args.video,args.out,args.count)
-    elif args.cmd=='run': result=run(read(args.job),args.work,args.confirmed,args.serve,args.port)
+    elif args.cmd=='run': result=run(load_job(args.job),args.work,args.confirmed,args.serve,args.port)
     elif args.cmd=='verify': result=verify_draft(args.draft)
     if getattr(args,'out',None) and args.cmd not in ('frames','import-srt'): write(args.out,result)
     print(json.dumps({'ok':result.get('ok',True),'data':result},ensure_ascii=False),flush=True)
