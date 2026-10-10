@@ -1,0 +1,11 @@
+runtime/
+__pycache__/
+*.pyc
+.env
+work/
+tasks/
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.zip
