@@ -1,6 +1,6 @@
 interface:
   display_name: "产品信息流批量剪辑"
-  short_description: "数字人口播与实拍随机批量编排，校正字幕并生成可编辑剪映草稿"
+  short_description: "一次校正文案与语义剪点，按通用风格批量生成可编辑剪映草稿"
   default_prompt: "加载 $product-feed-batch，先检测剪映环境，再收集本批素材与生产数量。"
 policy:
   allow_implicit_invocation: true

@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "name": "通用口播转化风格",
+  "description": "跨产品规则：连续口播、语义展示窗口、单一字幕主体、可选利益包装、一条一首配乐。文案、商品、价格、图片和必要声明由当前任务提供。",
+  "settings_file": "../defaults.json",
+  "settings": {},
+  "resource_preferences": "../preferred-resources.json",
+  "layout_defaults": {"bundle": "auto"},
+  "version": "0.4.0",
+  "requirements": ["corrected_subtitles", "semantic_broll_annotations_when_broll_is_supplied", "local_font", "verified_components_for_native_effects"],
+  "evidence_summary": {
+    "scope": "two_authorized_manual_projects_across_two_content_categories",
+    "principles": ["semantic_edit_points", "short_readable_captions", "in_place_emphasis_or_template_replacement", "optional_layout_components", "one_bgm_per_composition_with_tail_fade"],
+    "not_included": ["private_transcripts", "private_paths", "commercial_fonts", "music_files", "effect_cache_assets"]
+  }
+}

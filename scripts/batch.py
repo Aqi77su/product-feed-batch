@@ -19,6 +19,9 @@ import threading
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from caption_engine import prepare_document, append_captions, validate_caption_content, validate_requested_resources
+from semantic_plan import validate_annotations, map_document, plan_semantic_broll
+from layout_engine import append_layout, resolve_overlays
 
 ROOT = Path(__file__).resolve().parents[1]
 VIDEO = {'.mp4', '.mov', '.mkv', '.webm', '.m4v', '.avi'}
@@ -32,15 +35,32 @@ def read(path):
     return json.loads(Path(path).read_text(encoding='utf-8-sig'))
 
 
+def merge_dicts(base, override):
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        result[key] = merge_dicts(result[key], value) if isinstance(value, dict) and isinstance(result.get(key), dict) else copy.deepcopy(value)
+    return result
+
+
 def load_job(path):
-    job=read(path)
-    if job.get('preset'):
-        preset_path=Path(job['preset']).resolve(); preset=read(preset_path)
-        if preset.get('schema_version')!='1.0':raise ValueError('Unsupported preset schema')
-        job['settings']={**preset.get('settings',{}),**job.get('settings',{})}
-        if not job.get('resource_catalog') and preset.get('resource_catalog'):
-            job['resource_catalog']=str((preset_path.parent/preset['resource_catalog']).resolve())
-        job['preset_name']=preset['name']
+    job = read(path)
+    explicit_keys = set(job.get('settings', {}))
+    selected = job.get('preset') or 'general-conversion'
+    preset_path = ROOT/'presets/general-conversion/preset.json' if selected in ('default', 'general-conversion') else Path(selected).expanduser().resolve()
+    preset = read(preset_path)
+    if preset.get('schema_version') != '1.0': raise ValueError('Unsupported preset schema')
+    inherited = read(preset_path.parent/preset['settings_file']) if preset.get('settings_file') else {}
+    explicit_keys.update(preset.get('settings', {}))
+    if selected not in ('default', 'general-conversion'): explicit_keys.update(inherited)
+    job['settings'] = merge_dicts(merge_dicts(inherited, preset.get('settings', {})), job.get('settings', {}))
+    job['layout'] = merge_dicts(preset.get('layout_defaults', {}), job.get('layout', {}))
+    if not job.get('resource_catalog') and preset.get('resource_catalog'):
+        job['resource_catalog'] = str((preset_path.parent/preset['resource_catalog']).resolve())
+    if preset.get('resource_preferences'):
+        job['resource_preferences'] = str((preset_path.parent/preset['resource_preferences']).resolve())
+    job['preset_name'] = preset['name']
+    job['preset_version'] = preset.get('version')
+    job['_explicit_setting_keys'] = sorted(explicit_keys)
     return job
 
 
@@ -218,16 +238,17 @@ def setup(approved):
 
 
 def resources():
-    d = discover(); user = Path(d['user_data']); found = {'music': [], 'fonts': [], 'effects': []}
+    d = discover(); user = Path(d['user_data']); found = {'music': [], 'sfx': [], 'audio_candidates': [], 'fonts': [], 'effects': []}
     missing_records = []; encrypted = 0
-    for category, sub, exts in [('music', 'Cache/music', AUDIO), ('fonts', 'Cache/effect', {'.ttf', '.otf', '.ttc'}),
+    for category, sub, exts in [('audio_candidates', 'Cache/music', AUDIO), ('fonts', 'Cache/effect', {'.ttf', '.otf', '.ttc'}),
                                ('fonts', 'Cache/font', {'.ttf', '.otf', '.ttc'})]:
         base = user / sub
         if not base.exists(): continue
         for i, f in enumerate(base.rglob('*')):
             if i > 20000: break
             if f.is_file() and f.suffix.lower() in exts:
-                found[category].append({'name': f.stem, 'path': str(f.resolve()), 'available': True, 'source': 'cache'})
+                found[category].append({'name': f.stem, 'path': str(f.resolve()), 'available': True, 'source': 'cache',
+                                        'classification': 'unconfirmed_audio' if category == 'audio_candidates' else 'font_extension'})
     system = Path(os.getenv('WINDIR', 'C:/Windows')) / 'Fonts'
     if system.exists():
         for f in system.iterdir():
@@ -252,21 +273,26 @@ def resources():
                 p = v.get('font_path') or v.get('path')
                 if isinstance(p, str) and p:
                     ext = Path(p).suffix.lower()
-                    cat = 'music' if ext in AUDIO else 'fonts' if ext in {'.ttf', '.otf', '.ttc'} else None
+                    cat = ({'music':'music','sound':'sfx'}.get(v.get('type'),'audio_candidates') if ext in AUDIO else 'fonts' if ext in {'.ttf', '.otf', '.ttc'} else None)
                     if cat:
                         item = {'name': v.get('name') or v.get('material_name') or Path(p).stem,
-                                'path': p, 'available': Path(p).is_file(), 'source': 'recent:' + directory.name}
+                                'path': str(Path(p).resolve()), 'available': Path(p).is_file(), 'source': 'recent:' + directory.name,
+                                'classification': 'material_type' if cat in ('music','sfx') else 'font_extension' if cat == 'fonts' else 'unconfirmed_audio'}
                         (found[cat] if item['available'] else missing_records).append(item)
                 for x in v.values(): walk(x)
             elif isinstance(v, list):
                 for x in v: walk(x)
         walk(o)
-    for k in ('music', 'fonts'):
+    for k in ('music', 'sfx', 'audio_candidates', 'fonts'):
         found[k] = list({x['path']: x for x in found[k]}.values())
+    classified = {str(Path(x['path']).resolve()).casefold() for k in ('music','sfx') for x in found[k]}
+    found['audio_candidates'] = [x for x in found['audio_candidates'] if str(Path(x['path']).resolve()).casefold() not in classified]
     try:
         from PIL import ImageFont
         for font in found['fonts']:
-            try: font['name']=' '.join(ImageFont.truetype(font['path'],16).getname())
+            try:
+                font['file_name'] = Path(font['path']).stem
+                font['name']=' '.join(ImageFont.truetype(font['path'],16).getname())
             except Exception: pass
     except ImportError: pass
     return {**found, 'missing_records': missing_records, 'unreadable_recent_drafts': encrypted,
@@ -287,7 +313,11 @@ def paths(value, exts):
 
 def job_settings(job):
     settings = read(ROOT / 'presets/defaults.json')
-    settings.update(job.get('settings', {}))
+    settings = merge_dicts(settings, job.get('settings', {}))
+    explicit_keys = set(job.get('_explicit_setting_keys', job.get('settings', {}).keys()))
+    if (settings['width'], settings['height']) == (720, 1280):
+        for key, value in {'base_font_size': 13, 'subtitle_y': -0.390625, 'subtitle_scale': 1.15}.items():
+            if key not in explicit_keys: settings[key] = value
     for key in ('width', 'height', 'fps'):
         if not isinstance(settings[key], int) or settings[key] <= 0: raise ValueError(key)
     for key in ('opening_no_broll_s', 'ending_no_broll_s', 'sfx_min_gap_s'):
@@ -302,13 +332,46 @@ def job_settings(job):
     if settings['background']['mode'] not in ('none', 'blur', 'image'): raise ValueError('background.mode')
     if settings['background']['mode'] == 'image' and not Path(settings['background']['path']).is_file():
         raise ValueError('background image missing')
-    if settings['broll_mode'] not in ('count','ratio'):raise ValueError('broll_mode')
+    if settings['broll_mode'] not in ('semantic','count','ratio'):raise ValueError('broll_mode')
     if settings['broll_boundary_policy'] not in ('allow','prefer_cover','within_segment'):raise ValueError('broll_boundary_policy')
     if settings['music_short_policy'] not in ('reject','allow_silence'):raise ValueError('music_short_policy')
     if not 0<=settings['subtitle_border_width']<=100:raise ValueError('subtitle_border_width')
     if settings['music_source_start_s']<0 or min(settings['music_fade_in_s'],settings['music_fade_out_s'])<0:raise ValueError('music timing')
     if len(settings['broll_count'])!=2 or any(not isinstance(x,int) or x<0 for x in settings['broll_count']) or settings['broll_count'][0]>settings['broll_count'][1]:raise ValueError('broll_count')
+    for key in ('main_speed', 'subtitle_scale', 'subtitle_font_px_per_unit', 'base_font_size'):
+        if not isinstance(settings[key], (int, float)) or isinstance(settings[key], bool) or not math.isfinite(settings[key]) or settings[key] <= 0:
+            raise ValueError(key+' must be finite and positive')
+    if not isinstance(settings['main_volume'], (int, float)) or not math.isfinite(settings['main_volume']) or settings['main_volume'] < 0: raise ValueError('main_volume')
+    if settings['subtitle_long_cue_policy'] not in ('error', 'approximate_equal'): raise ValueError('subtitle_long_cue_policy')
+    if settings['missing_effect_policy'] not in ('error', 'plain'): raise ValueError('missing_effect_policy')
+    if settings['caption_animation_mode'] not in ('auto', 'none', 'word'): raise ValueError('caption_animation_mode')
+    if settings['inline_emphasis_mode'] not in ('flower', 'border'): raise ValueError('inline_emphasis_mode')
+    if not isinstance(settings.get('music_enabled'), bool): raise ValueError('music_enabled must be true or false')
+    for key in ('emphasis_probability', 'template_probability', 'subtitle_max_width_ratio'):
+        if not 0 <= settings[key] <= 1: raise ValueError(key)
+    for key in ('subtitle_color', 'keyword_color'):
+        value = settings[key]
+        if not isinstance(value, list) or len(value) != 3 or any(not isinstance(c,(int,float)) or not math.isfinite(c) or not 0<=c<=1 for c in value): raise ValueError(key+' requires normalized RGB')
+    y = settings['subtitle_y']
+    caption_height = settings['base_font_size']*settings['subtitle_font_px_per_unit']*settings['width']/1080*settings['subtitle_scale']*1.4
+    if not isinstance(y,(int,float)) or not math.isfinite(y) or abs(y)+caption_height/settings['height']>.99: raise ValueError('subtitle_y/font size places ordinary captions outside the safe canvas')
     return settings
+
+
+def resolve_catalog_paths(catalog, base):
+    """Resolve portable catalog resource paths once, including nested styles."""
+    def walk(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key.endswith('path') and isinstance(item,str) and item:
+                    p = Path(item).expanduser()
+                    value[key] = str((p if p.is_absolute() else Path(base)/p).resolve())
+                else: walk(item)
+        elif isinstance(value,list):
+            for item in value: walk(item)
+    result = copy.deepcopy(catalog)
+    walk(result)
+    return result
 
 
 def inventory(job):
@@ -318,7 +381,7 @@ def inventory(job):
     settings = job_settings(job)
     main = paths(job.get('main_videos'), VIDEO)
     if not main: raise ValueError('No main videos')
-    media = paths(job.get('broll'), VIDEO)
+    media = paths(job.get('broll') or [a['path'] for a in job.get('broll_assets', []) if a.get('path')], VIDEO)
     rows, broll, errors = [], [], []
     for key, files, result in [('main', main, rows), ('broll', media, broll)]:
         for f in files:
@@ -332,6 +395,13 @@ def inventory(job):
     # Same file copied under another name is one source, never duplicate recognition.
     rows = list({x['id']: x for x in rows}.values())
     broll = list({x['id']: x for x in broll}.values())
+    for annotation in job.get('broll_assets', []):
+        matching = [x for x in broll if annotation.get('asset_id') == x['id'] or (annotation.get('path') and Path(annotation['path']).resolve() == Path(x['path']).resolve())]
+        if len(matching) != 1: raise ValueError('broll_assets must identify one inventoried source')
+        tags = annotation.get('tags', [])
+        if not isinstance(tags, list) or any(not isinstance(t, str) or not t.strip() for t in tags): raise ValueError('broll asset tags must be nonempty strings')
+        matching[0]['tags'] = sorted(set(tags))
+        if annotation.get('usable_ranges') is not None: matching[0]['usable_ranges'] = copy.deepcopy(annotation['usable_ranges'])
     if not rows: raise ValueError('No usable main video')
     distribution = job.get('distribution')
     if distribution is None:
@@ -341,17 +411,19 @@ def inventory(job):
     if any(isinstance(x, bool) or not isinstance(x, int) or x < 0 for x in distribution.values()) or sum(distribution.values()) != count:
         raise ValueError('distribution must sum to count')
     overlays = []
-    for x in job.get('overlays', []):
+    overlay_specs = resolve_overlays(job, settings)
+    for x in overlay_specs:
         if x.get('kind') == 'image': overlays.append(probe(x['path']))
         elif x.get('kind') != 'text' or not x.get('text'): raise ValueError('overlay needs image path or text')
     ref = probe(job['reference_video']) if job.get('reference_video') else None
-    catalog = read(job['resource_catalog']) if job.get('resource_catalog') else read(ROOT / 'presets/resources.json')
+    catalog_path = Path(job['resource_catalog']) if job.get('resource_catalog') else ROOT/'presets/resources.json'
+    catalog = resolve_catalog_paths(read(catalog_path), catalog_path.parent)
     if not job.get('resource_catalog'):
-        discovered=resources(); preferred=read(ROOT/'presets/preferred-resources.json')
+        discovered=resources(); preferred=read(job.get('resource_preferences') or ROOT/'presets/preferred-resources.json')
         def canonical(value): return ''.join(c.lower() for c in value if c.isalnum())
         for key in ('music','fonts'):
-            wanted=[canonical(x) for x in preferred[key]]
-            catalog[key]=[x for x in discovered[key] if any(name in canonical(x['name']) for name in wanted)]
+            wanted=[canonical(x) for x in (settings['preferred_fonts'] if key == 'fonts' else preferred[key])]
+            catalog[key]=[x for x in discovered[key] if any(name in canonical(x['name']) or name in canonical(Path(x['path']).stem) for name in wanted)]
         if not catalog['fonts']:
             raise ValueError('默认得意黑/俪金黑未定位；请确认安装字体或指定替代 catalog，不从全字体池随机')
     for k in ('music', 'fonts', 'sfx'):
@@ -361,14 +433,17 @@ def inventory(job):
     d = discover()
     draft_root = job.get('draft_root') or d['draft_root']
     warnings = []
-    for k in ('text_intro', 'flowers', 'video_intro', 'video_outro'):
+    for k in ('caption_animations', 'text_templates', 'flowers'):
         if not catalog.get(k): warnings.append(f'{k}: empty verified catalog; disabled')
     if not catalog.get('music'): warnings.append('No BGM candidate; batch will have no BGM')
     if not catalog.get('fonts'): warnings.append('No specified font; backend default font (unverified display)')
     if not broll: warnings.append('No product footage; talking-head only')
-    return {'assembly': job.get('assembly'), 'main': rows, 'broll': broll, 'count': count, 'distribution': distribution, 'overlays': overlays,
+    if settings.get('keyword_popup_probability'): warnings.append('Deprecated keyword_popup_probability ignored: duplicated spoken popups are no longer generated')
+    if settings['broll_mode'] != 'semantic': warnings.append('Legacy time-random broll mode explicitly enabled; semantic style is disabled')
+    if settings['missing_effect_policy'] == 'plain': warnings.append('Explicit plain fallback permitted; missing native components will be reported as degraded, not faithful reproduction')
+    return {'assembly': job.get('assembly'), 'main': rows, 'broll': broll, 'count': count, 'distribution': distribution, 'overlays': overlays, 'overlay_specs': overlay_specs,
             'reference': ref, 'draft_root': draft_root, 'settings': settings, 'errors': errors, 'warnings': warnings,
-            'estimated_timeline_s': sum(x['duration_ms'] * distribution[x['id']] for x in rows) / 1000,
+            'estimated_timeline_s': sum(round(x['duration_ms']/settings['main_speed']) * distribution[x['id']] for x in rows) / 1000,
             'source_bytes': sum(Path(x['path']).stat().st_size for x in rows + broll), 'catalog': catalog}
 
 
@@ -419,9 +494,9 @@ def transcribe(job, work):
         cues = [{'id': f's{i+1:04}', 'text': c['text'], 'start_ms': c['startMs'], 'end_ms': c['endMs'],
                  'words': c.get('words', []), 'keywords': []} for i, c in enumerate(segments)]
         write(raw, {'schema_version': '1.0', 'source_id': x['id'], 'source_hash': x['sha256'],
-                    'status': 'raw', 'asr_version': '0.2.3', 'cues': cues})
+                    'status': 'raw', 'asr_version': '0.2.3', 'timestamp_basis': 'source_media', 'cues': cues})
         out.append({'source_id': x['id'], 'raw': str(raw), 'cached': False})
-    return {'subtitles': out, 'next': 'AI maps scripts, corrects text, adds keyword char ranges and saves corrected JSON'}
+    return {'subtitles': out, 'next': 'Correct once: align words, semantic keywords, broll_opportunities, talking_head_preferred and title_candidates; do not plan each variant separately'}
 
 
 def import_srt(video, srt, out):
@@ -437,7 +512,7 @@ def import_srt(video, srt, out):
         if not m: raise ValueError('Invalid SRT time')
         cues.append({'id': f's{len(cues)+1:04}', 'start_ms': ms(m[1]), 'end_ms': ms(m[2]),
                      'text': '\n'.join(lines[i+1:]), 'words': [], 'keywords': [], 'timing_precision': 'cue'})
-    value = {'schema_version': '1.0', 'source_id': 'main_' + h[:16], 'source_hash': h, 'status': 'raw', 'cues': cues}
+    value = {'schema_version': '1.0', 'source_id': 'main_' + h[:16], 'source_hash': h, 'status': 'raw', 'timestamp_basis': 'source_media', 'cues': cues}
     write(out, value); return {'path': str(Path(out).resolve()), 'cues': len(cues), 'duration_ms': x['duration_ms']}
 
 
@@ -470,17 +545,45 @@ def verify_catalog(catalog):
             if k == 'flowers' and not x.get('effect_id'): raise ValueError('flower effect_id missing')
             if k != 'flowers' and not x.get('enum'): raise ValueError('animation enum missing')
             if x.get('cache_path') and not Path(x['cache_path']).is_dir(): raise ValueError('effect cache missing')
+    for kind in ('caption_animations', 'text_templates'):
+        for item in catalog.get(kind, []):
+            if item.get('verified') is not True or not catalog.get('verified_jianying_version'):
+                raise ValueError(kind+' requires local verification and verified_jianying_version')
+            if kind == 'text_templates' and not Path(item.get('component_path', '')).is_file(): raise ValueError('text template component missing')
+            if kind == 'caption_animations' and (not item.get('resource_id') or not Path(item.get('cache_path', '')).is_dir()): raise ValueError('native caption animation resource missing')
 
 
 def validate_job(job):
     inv = inventory(job)
     if inv['errors']: raise ValueError(json.dumps(inv['errors'], ensure_ascii=False))
     verify_catalog(inv['catalog'])
+    if inv['settings'].get('music_enabled', True) and not inv['catalog'].get('music'):
+        raise ValueError('BGM requested but no confirmed usable music; select a local track or explicitly set music_enabled=false')
+    inv['documents'] = {}
     for x in inv['main']:
         if not inv.get('assembly') and inv['distribution'][x['id']] == 0: continue
         p = job.get('subtitles', {}).get(x['id'])
         if not p: raise ValueError('Missing corrected subtitles for ' + x['id'])
-        validate_subtitles(read(p), x)
+        data = read(p)
+        validate_subtitles(data, x)
+        annotation_settings = {**inv['settings'], 'available_asset_tags': sorted({tag for asset in inv['broll'] for tag in asset.get('tags', [])})}
+        annotation_errors = validate_annotations(data, x, annotation_settings)
+        if annotation_errors: raise ValueError('Semantic annotation errors for '+x['id']+': '+str(annotation_errors))
+        if inv['settings']['broll_mode'] == 'semantic' and inv['broll'] and 'broll_opportunities' not in data:
+            raise ValueError('Mark broll_opportunities once for '+x['id']+' before semantic planning')
+        font = inv['catalog'].get('fonts', [None])[0] if inv['catalog'].get('fonts') else None
+        inv['documents'][x['id']] = prepare_document(data, inv['settings'], font)
+        # Compile into memory before any media copying. The same native compiler
+        # catches missing requested resources, bad template dependencies and
+        # unsafe text geometry during validate/plan, not halfway through a batch.
+        inv['warnings'].extend(inv['documents'][x['id']].get('warnings', []))
+        for candidate_font in inv['catalog'].get('fonts', [None]):
+            inv['warnings'].extend(validate_requested_resources(inv['documents'][x['id']]['cues'], inv['settings'],
+                inv['catalog'], candidate_font, lambda path: str(Path(path).resolve())))
+            preflight = append_captions({'tracks': [], 'materials': {}}, inv['documents'][x['id']]['cues'],
+                inv['settings'], inv['catalog'], candidate_font, lambda path: str(Path(path).resolve()),
+                random.Random('preflight:'+x['id']))
+            inv['warnings'].extend(w for event in preflight for w in event.get('warnings', []))
     validate_assembly(inv)
     if inv.get('assembly'):
         for group in inv['assembly']['groups']:
@@ -566,60 +669,8 @@ def detect_mode(job, work):
 
 
 def plan(inv):
-    settings=inv['settings']; catalog=inv['catalog']; source_map={x['id']:x for x in inv['main']}; units=[]
-    assembly=inv.get('assembly'); master=random.Random(settings['seed'])
-    if assembly:
-        validate_assembly(inv)
-        for group in assembly['groups']:
-            sizes=[len(s['sources']) for s in group['sections']]; pool=math.prod(sizes)
-            indices=master.sample(range(pool),min(group['count'],pool))
-            indices += [master.randrange(pool) for _ in range(group['count']-len(indices))]
-            for index in indices:
-                cursor=index; selected=[]
-                for section,size in reversed(list(zip(group['sections'],sizes))):
-                    selected.append(section['sources'][cursor%size]); cursor//=size
-                units.append((group['script_id'],list(reversed(selected)),index))
-    else:
-        for source in inv['main']:
-            for variant in range(inv['distribution'][source['id']]): units.append((source['id'],[source['id']],variant))
-    items=[]; offset=0
-    for number,(script_id,ids,combination) in enumerate(units,1):
-        seed=hashlib.sha256(f"{settings['seed']}:{script_id}:{combination}:{number}".encode()).hexdigest(); rng=random.Random(seed)
-        segments=[]; duration=0
-        for source_id in ids:
-            source=source_map[source_id]; segments.append({'source_id':source_id,'path':source['path'],'start_ms':duration,'duration_ms':source['duration_ms']}); duration+=source['duration_ms']
-        left=min(duration,round(settings['opening_no_broll_s']*1000));right=max(left,duration-round(settings['ending_no_broll_s']*1000))
-        broll=[];total=0;previous=None; boundaries=[x['start_ms'] for x in segments[1:]]
-        target=min(right-left,round(duration*rng.uniform(*settings['broll_ratio'])))
-        requested=rng.randint(*settings['broll_count']) if settings['broll_mode']=='count' else 10000
-        attempts=0
-        while len(broll)<requested and attempts<200 and (settings['broll_mode']=='count' or total<target):
-            attempts+=1
-            candidates=[x for x in inv['broll'] if x['id']!=previous and (x['duration_ms']>=settings['broll_duration_s'][0]*1000 or settings['broll_short_policy']=='allow')]
-            if not candidates: break
-            footage=rng.choice(candidates);length=min(round(rng.uniform(*settings['broll_duration_s'])*1000),footage['duration_ms'],right-left)
-            if settings['broll_mode']=='ratio':length=min(length,target-total)
-            if length<400:break
-            if length<settings['broll_duration_s'][0]*1000 and settings['broll_short_policy']=='skip':break
-            position=rng.randint(left,max(left,right-length))
-            if settings['broll_boundary_policy']=='prefer_cover' and boundaries:
-                boundary=rng.choice(boundaries);position=max(left,min(right-length,boundary-length//2))
-            if settings['broll_boundary_policy']=='within_segment' and any(position<b<position+length for b in boundaries):continue
-            if any(position<b['start_ms']+b['duration_ms']+settings['broll_gap_s'][0]*1000 and position+length+settings['broll_gap_s'][0]*1000>b['start_ms'] for b in broll):continue
-            broll.append({'asset_id':footage['id'],'path':footage['path'],'start_ms':position,'duration_ms':length,
-                          'source_start_ms':rng.randint(0,footage['duration_ms']-length),'intro':choice(rng,catalog,'video_intro'),'outro':choice(rng,catalog,'video_outro')})
-            total+=length;previous=footage['id']
-        broll.sort(key=lambda x:x['start_ms'])
-        music_pool=catalog.get('music',[])
-        if not settings['music_loop'] and settings['music_short_policy']=='reject':
-            music_pool=[x for x in music_pool if x['duration_ms']-settings['music_source_start_s']*1000>=duration]
-            if catalog.get('music') and not music_pool:raise ValueError(f'No sufficiently long BGM for output {number}; choose short policy or longer music')
-        items.append({'number':number,'script_id':script_id,'source_id':ids[0],'source_path':segments[0]['path'],
-                      'segments':segments,'combination_index':combination,'variant':number,'seed':seed,'start_ms':offset,'duration_ms':duration,
-                      'broll':broll,'music':rng.choice(music_pool) if music_pool else None,'font':choice(rng,catalog,'fonts'),
-                      'effective_broll_ratio':round(total/duration,4),'requested_broll_count':requested if settings['broll_mode']=='count' else None})
-        offset+=duration
-    return {'items':items,'duration_ms':offset,'settings':settings,'warnings':inv['warnings']}
+    from planner import plan as make_plan
+    return make_plan(inv, sys.modules[__name__])
 
 
 class Status:
@@ -651,202 +702,8 @@ class Status:
 
 
 def build(job, inv, resolved, work, state):
-    # Import the actual upstream wrapper. No monkeypatching and no invented draft format.
-    sys.path.insert(0, str(BACKEND/'scripts'))
-    sys.path.insert(0, str(BACKEND/'scripts/vendor'))
-    from jy_wrapper import JyProject
-    import pyJianYingDraft as draft
-    root = inv['draft_root']
-    if not root or not Path(root).is_dir(): raise ValueError('Detected draft root missing; do not guess output path')
-    name = job.get('name', '')
-    if not name or re.search(r'[<>:"/\\|?*\x00-\x1f]', name) or name in ('.', '..') or name.endswith(('.', ' ')):
-        raise ValueError('Invalid/nonempty draft name required')
-    directory = Path(root)/name
-    if directory.exists(): raise FileExistsError('Draft already exists; choose new batch name')
-    settings = inv['settings']; catalog = inv['catalog']
-    project = JyProject(name, width=settings['width'], height=settings['height'], drafts_root=root, overwrite=False)
-    script = project.script; script.fps = settings['fps']; project._explicit_res = True
-    write(directory/'INCOMPLETE.json', {'phase': 'building'})
-    state.update('copying_materials', draft_path=str(directory))
-    stage_cache = {}; material_cache = {}
-    def stage(path):
-        p = Path(path).resolve(); h = digest(p)
-        if h not in stage_cache:
-            target = directory/'materials'/(h + p.suffix.lower()); target.parent.mkdir(exist_ok=True)
-            shutil.copy2(p, target); stage_cache[h] = str(target.resolve())
-        return stage_cache[h]
-    def material(path, audio=False):
-        p = stage(path); key = (p, audio)
-        if key not in material_cache:
-            material_cache[key] = draft.AudioMaterial(p) if audio else draft.VideoMaterial(p)
-        return material_cache[key]
-    def track(kind, name, index):
-        script.add_track(kind, name, absolute_index=index)
-    for kind, name, index in [(draft.TrackType.video,'Main',0), (draft.TrackType.video,'Broll',10),
-                              (draft.TrackType.text,'Subtitles',30), (draft.TrackType.text,'Emphasis',40),
-                              (draft.TrackType.text,'Title',50), (draft.TrackType.audio,'Music',0),
-                              (draft.TrackType.audio,'SFX',0)]: track(kind,name,index)
-    if settings['background']['mode'] == 'image': track(draft.TrackType.video,'Background',-10)
-    for i, o in enumerate(job.get('overlays', [])):
-        track(draft.TrackType.video if o['kind']=='image' else draft.TrackType.text, f'Overlay{i}', 60+i)
-    def tr(start, length): return draft.Timerange(round(start*1000), round(length*1000))
-    def transform(value): return draft.ClipSettings(**value)
-    def video(path, start, length, source_start=0, volume=0, clip=None):
-        return draft.VideoSegment(material(path), tr(start,length), source_timerange=tr(source_start,length),
-                                  volume=volume, clip_settings=transform(clip or {}))
-    def audio(path, start, length, source_start=0, volume=0.12):
-        return draft.AudioSegment(material(path,True),tr(start,length),source_timerange=tr(source_start,length),volume=volume)
-    def text(value,start,length,size,y,color,font=None,spans=None):
-        seg = draft.TextSegment(value,tr(start,length),style=draft.TextStyle(size=size,color=tuple(color)),
-                                border=draft.TextBorder(width=settings['subtitle_border_width']),clip_settings=draft.ClipSettings(transform_y=y),
-                                rich_spans=spans or [])
-        if font:
-            if font.get('enum'): seg.font = getattr(draft.FontType,font['enum']).value
-            # Upstream fork lacks font_path constructor; inject explicitly after serialization.
-            font_paths[seg.material_id] = stage(font['path'])
-        return seg
-    font_paths = {}; flower_materials = {}
-    def animate(seg, item, enum_cls):
-        if item: seg.add_animation(getattr(enum_cls,item['enum']),duration=min(300000,seg.duration//3))
-    for kind in ('flowers','text_intro','video_intro','video_outro'):
-        for x in catalog.get(kind,[]):
-            if x.get('cache_path'):
-                src = Path(x['cache_path']); dest = directory/'effect_resources'/kind/src.name
-                shutil.copytree(src,dest,dirs_exist_ok=True)
-    for item in resolved['items']:
-        rng = random.Random(item['seed'] + ':text'); offset=item['start_ms']; duration=item['duration_ms']
-        for part in item['segments']:
-            main=video(part['path'],offset+part['start_ms'],part['duration_ms'],volume=1,clip=settings['main_transform'])
-            if settings['background']['mode']=='blur': main.add_background_filling('blur')
-            script.add_segment(main,'Main')
-        if settings['background']['mode']=='image':
-            script.add_segment(video(settings['background']['path'],offset,duration),'Background')
-        for b in item['broll']:
-            v=video(b['path'],offset+b['start_ms'],b['duration_ms'],b['source_start_ms'],clip=settings['broll_transform'])
-            animate(v,b['intro'],draft.IntroType); animate(v,b['outro'],draft.OutroType)
-            script.add_segment(v,'Broll')
-        cues=[]
-        for part in item['segments']:
-            for original in read(job['subtitles'][part['source_id']])['cues']:
-                c=copy.deepcopy(original); c['id']=part['source_id']+':'+c['id']
-                c['start_ms']+=part['start_ms']; c['end_ms']=min(original['end_ms'],part['duration_ms'])+part['start_ms']
-                for k in c.get('keywords',[]):k['start_ms']+=part['start_ms'];k['end_ms']=min(k['end_ms']+part['start_ms'],c['end_ms'])
-                cues.append(c)
-        previous_sfx_end=offset; text_events=[]
-        for c in cues:
-            start=offset+c['start_ms']; length=min(c['end_ms'],duration)-c['start_ms']
-            spans=[draft.RichTextSpan(k['char_start'],k['char_end'],color=tuple(settings['keyword_color']),bold=True) for k in c.get('keywords',[])]
-            base=text(c['text'],start,length,settings['base_font_size'],settings['subtitle_y'],settings['subtitle_color'],item['font'],spans)
-            intro=choice(rng,catalog,'text_intro') if rng.random()<settings['animation_probability'] else None
-            animate(base,intro,draft.TextIntro); script.add_segment(base,'Subtitles')
-            # Max one keyword popup per cue; avoid simultaneous overlap in emphasis track.
-            popup=None
-            if c.get('keywords') and rng.random()<settings['keyword_popup_probability']:
-                k=rng.choice(c['keywords']); ps=offset+k['start_ms']; pe=min(offset+k['end_ms'],offset+duration)
-                popup=text(k['text'],ps,pe-ps,settings['keyword_font_size'],settings['keyword_y'],settings['keyword_color'],item['font'])
-                flower=choice(rng,catalog,'flowers')
-                if flower:
-                    # Upstream __contains__ does not handle TextEffect at save time.
-                    # Keep original backend untouched; register its exported effect after save.
-                    from pyJianYingDraft.text_segment import TextEffect
-                    effect=TextEffect(flower['effect_id'],flower['effect_id'])
-                    popup.extra_material_refs.append(effect.global_id)
-                    flower_materials[popup.material_id]=(flower,effect.export_json())
-                animate(popup,choice(rng,catalog,'text_intro'),draft.TextIntro); script.add_segment(popup,'Emphasis')
-            event={'cue_id':c['id'],'intro':intro,'popup':bool(popup),'flower':flower if popup else None,'sfx':None}
-            if settings['sfx_mode']=='every_cue' or (settings['sfx_mode']=='keywords' and c.get('keywords')):
-                effect=choice(rng,catalog,'sfx')
-                if effect and start>=previous_sfx_end+settings['sfx_min_gap_s']*1000:
-                    mat=material(effect['path'],True); n=min(mat.duration//1000,offset+duration-start,1200)
-                    if n>0:
-                        script.add_segment(audio(effect['path'],start,n,volume=settings['sfx_volume']),'SFX')
-                        previous_sfx_end=start+n; event['sfx']=effect
-            text_events.append(event)
-        item['subtitle_events']=text_events
-        title=job.get('titles',{}).get(item['script_id'],job.get('titles',{}).get(item['source_id'],job.get('title','')))
-        if title: script.add_segment(text(title,offset,duration,settings['title_font_size'],settings['title_y'],[1,1,1],item['font']),'Title')
-        for i,o in enumerate(job.get('overlays',[])):
-            if o['kind']=='image':
-                seg=video(o['path'],offset,duration,clip=o.get('transform',{'scale_x':0.35,'scale_y':0.35,'transform_y':0.55}))
-            else:
-                seg=text(o['text'],offset,duration,o.get('font_size',3),o.get('y',-0.92),o.get('color',[1,1,1]),item['font'])
-            script.add_segment(seg,f'Overlay{i}')
-        if item['music']:
-            p=item['music']['path']; mat=material(p,True); n=mat.duration//1000
-            if n<=0: raise ValueError('BGM zero duration')
-            position=0; item['music_chunks']=[]; source_start=round(settings['music_source_start_s']*1000)
-            if source_start>=n:raise ValueError('Music start exceeds source duration')
-            while position<duration:
-                length=min(n-source_start,duration-position); seg=audio(p,offset+position,length,source_start=source_start,volume=settings['music_volume'])
-                fade_in=min(round(settings['music_fade_in_s']*1e6),length*1000//3) if position==0 else 0
-                fade_out=min(round(settings['music_fade_out_s']*1e6),length*1000//3) if position+length==duration else 0
-                if fade_in or fade_out:seg.add_fade(fade_in,fade_out)
-                script.add_segment(seg,'Music'); item['music_chunks'].append({'start_ms':position,'duration_ms':length}); position+=length
-                if not settings['music_loop']:break
-                source_start=0
-        state.update('building',completed=item['number'],items=[{'number':x['number'],'source_id':x['source_id'],'start_ms':x['start_ms'],'duration_ms':x['duration_ms']} for x in resolved['items'][:item['number']]])
-    # Upstream text segments reference their Speed but do not register it.
-    speed_ids={s.global_id for s in script.materials.speeds}
-    for layer in script.tracks.values():
-        for seg in layer.segments:
-            if isinstance(seg,draft.TextSegment) and seg.speed.global_id not in speed_ids:
-                script.materials.speeds.append(seg.speed); speed_ids.add(seg.speed.global_id)
-    project.save()
-    content_path=directory/'draft_info.json'; content=read(content_path)
-    # Write font paths and portable flower resources into serialized material nodes.
-    flower_paths = {x['effect_id']:str((directory/'effect_resources'/'flowers'/Path(x['cache_path']).name).resolve())
-                    for x in catalog.get('flowers',[]) if x.get('cache_path')}
-    for t in content.get('materials',{}).get('texts',[]):
-        inner=json.loads(t['content'])
-        if t['id'] in flower_materials:
-            flower,effect=flower_materials[t['id']]
-            for style in inner.get('styles',[]):
-                style['effectStyle']={'id':flower['effect_id'],'path':flower_paths.get(flower['effect_id'],'')}
-            if flower['effect_id'] in flower_paths: effect['path']=flower_paths[flower['effect_id']]
-            content['materials'].setdefault('effects',[]).append(effect)
-        if t['id'] in font_paths:
-            t['font_path']=font_paths[t['id']]
-            for style in inner.get('styles',[]):
-                if 'font' in style: style['font']['path']=font_paths[t['id']]
-        for style in inner.get('styles',[]):
-            effect=style.get('effectStyle',{})
-            if effect.get('id') in flower_paths: effect['path']=flower_paths[effect['id']]
-        t['content']=json.dumps(inner,ensure_ascii=False)
-    for effect in content.get('materials',{}).get('effects',[]):
-        if effect.get('effect_id') in flower_paths: effect['path']=flower_paths[effect['effect_id']]
-    for kind in ('flowers','text_intro','video_intro','video_outro'):
-        for x in catalog.get(kind,[]):
-            if not x.get('cache_path'): continue
-            original=str(Path(x['cache_path']).resolve()).replace('\\','/')
-            dest=str((directory/'effect_resources'/kind/Path(x['cache_path']).name).resolve()).replace('\\','/')
-            def relocate(v):
-                if isinstance(v,dict):
-                    for k,value in v.items():
-                        if isinstance(value,str) and value.replace('\\','/').startswith(original): v[k]=value.replace('\\','/').replace(original,dest,1)
-                        else: relocate(value)
-                elif isinstance(v,list):
-                    for value in v: relocate(value)
-            relocate(content)
-    write(content_path,content)
-    meta_path=directory/'draft_meta_info.json'; meta=read(meta_path)
-    meta.update(draft_name=name,draft_fold_path=str(directory.resolve()),draft_root_path=str(Path(root).resolve()),
-                tm_duration=resolved['duration_ms']*1000,tm_draft_modified=int(time.time()*1e6))
-    write(meta_path,meta)
-    write(Path(work)/'resolved-plan.json',resolved); write(directory/'batch-resolved-plan.json',resolved)
-    write(directory/'batch-job.json',job)
-    index=directory/'segments-index.csv'
-    with index.open('w',encoding='utf-8-sig',newline='') as f:
-        writer=csv.DictWriter(f,fieldnames=['number','source_id','variant','start_s','end_s','duration_s','seed']); writer.writeheader()
-        for x in resolved['items']:
-            writer.writerow({'number':x['number'],'source_id':x['source_id'],'variant':x['variant'],'start_s':x['start_ms']/1000,
-                             'end_s':(x['start_ms']+x['duration_ms'])/1000,'duration_s':x['duration_ms']/1000,'seed':x['seed']})
-    report=verify_draft(directory,resolved)
-    report.update(warnings=inv['warnings'],jianying_open_verified=False,root_registration_verified=False,
-                  materials_copied=len(stage_cache),draft_path=str(directory.resolve()))
-    write(directory/'build-report.json',report)
-    if not report['ok']: raise RuntimeError('Draft structural verification failed: '+str(report['errors']))
-    (directory/'INCOMPLETE.json').unlink()
-    return report
+    from generator import build as build_draft
+    return build_draft(job, inv, resolved, work, state, sys.modules[__name__])
 
 
 def verify_draft(directory,resolved=None):
@@ -854,6 +711,7 @@ def verify_draft(directory,resolved=None):
     content=read(directory/'draft_info.json')
     if resolved is None: resolved=read(directory/'batch-resolved-plan.json')
     errors=[]; tracks=content.get('tracks',[]); materials=content.get('materials',{})
+    errors.extend(validate_caption_content(content))
     videos={m['id']:m for m in materials.get('videos',[])}
     for group in ('videos','audios'):
         for m in materials.get(group,[]):
@@ -869,13 +727,18 @@ def verify_draft(directory,resolved=None):
         cursor=0
         for seg,(item,part) in zip(main['segments'],expected):
             t=seg['target_timerange']
-            if t['start']!=cursor or t['duration']!=part['duration_ms']*1000:errors.append('Main continuity/duration mismatch')
+            if t.get('start',0)!=cursor or t['duration']!=part['duration_ms']*1000:errors.append('Main continuity/duration mismatch')
+            if part.get('source_duration_ms'):
+                source_range = seg.get('source_timerange', {})
+                if abs(source_range.get('duration',0)/1000-part['source_duration_ms'])>2: errors.append('Main source duration mismatch')
+                actual_speed = source_range.get('duration',0)/max(1,t['duration'])
+                if abs(actual_speed-part.get('speed',1))>0.002: errors.append('Main speed/time mapping mismatch')
             cursor+=t['duration']
     material_ids={m['id'] for group in materials.values() if isinstance(group,list) for m in group if isinstance(m,dict) and 'id' in m}
     for track in tracks:
         prior_end = 0
         for seg in track.get('segments',[]):
-            t=seg['target_timerange']; start=t['start']; end=start+t['duration']
+            t=seg['target_timerange']; start=t.get('start',0); end=start+t['duration']
             if t['duration']<=0 or start<0 or end>total: errors.append('Segment outside timeline')
             if start < prior_end: errors.append('Overlap within track: '+str(track.get('name')))
             prior_end = end
@@ -891,6 +754,16 @@ def verify_draft(directory,resolved=None):
                 if seg.get('volume')!=0: errors.append('Broll not muted')
                 source=seg.get('source_timerange',{}); mat=videos.get(seg['material_id'],{})
                 if source.get('start',0)+source.get('duration',0)>mat.get('duration',0)+40000: errors.append('Broll exceeds source')
+                if resolved['settings'].get('broll_boundary_policy') == 'within_segment':
+                    if not any(p['start_ms']*1000<=local and end-item['start_ms']*1000 <= (p['start_ms']+p['duration_ms'])*1000 for p in item['segments']): errors.append('Broll crosses speaker boundary')
+                if resolved['settings'].get('broll_mode') == 'semantic':
+                    planned = next((p for p in item.get('broll',[]) if p['start_ms']*1000==local and p['duration_ms']*1000==t['duration']),None)
+                    if not planned or not planned.get('opportunity_id'): errors.append('Broll not backed by semantic opportunity')
+    for material in materials.get('text_templates', []):
+        for child in material.get('text_info_resources', []):
+            if child.get('text_material_id') not in material_ids: errors.append('Template child text missing')
+    all_ids=[m['id'] for group in materials.values() if isinstance(group,list) for m in group if isinstance(m,dict) and 'id' in m]
+    if len(all_ids)!=len(set(all_ids)): errors.append('Duplicate material IDs')
     return {'ok':not errors,'errors':errors,'tracks':[(t.get('name'),len(t.get('segments',[]))) for t in tracks],
             'timeline_s':total/1e6,'count':len(resolved['items'])}
 
@@ -899,6 +772,7 @@ def run(job, work, confirmed, serve=False, port=0):
     if not confirmed: raise ValueError('User batch confirmation required before --confirmed')
     work=Path(work).resolve(); work.mkdir(parents=True,exist_ok=True)
     inv=validate_job(job); resolved=plan(inv); write(work/'inventory.json',inv); write(work/'planned.json',resolved)
+    for source_id, doc in inv.get('documents', {}).items(): write(work/'prepared-subtitles'/(source_id+'.prepared.json'), doc)
     state=Status(work,inv['count']); server=None
     if serve:
         server=state.server(port); url=f'http://127.0.0.1:{server.server_address[1]}'
