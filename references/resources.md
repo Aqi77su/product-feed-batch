@@ -35,6 +35,8 @@ v0.5另有text_styles（完整直接文字样式配方）与text_animations（�
 
 ## 包内提取工具
 
+v0.5.3：字体扫描会从Cache/effect或Cache/font的紧邻数字ID目录提取resource_id并记录cache_directory_id证据。preset_resources也支持resources输出的effects列表：只把预设明确的字效ID绑定artistEffect缓存、明确的文字动画ID绑定effect缓存；目录须实际存在且非空。不改变已确认ID、不自动下载、不将绑定等同于视觉verified。旧草稿materials字体仍可按名称/明确路径绑定。
+
 输入必须是已授权、本地明文工程；加密先用history_style.py调用包内本机DLL解密。不会下载上游工具。
 
 ```powershell

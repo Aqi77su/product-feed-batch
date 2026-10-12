@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
-from font_identity import font_names,collect_font_records,resolve_font,merge_fonts
+from font_identity import font_names,collect_font_records,resolve_font,merge_fonts,cache_font_id
 from preset_resources import bind
 from component_tools import referenced_text_animations,extract_text_animation,audit_resources
 import batch
@@ -103,5 +103,26 @@ class ResourceIdentityTests(unittest.TestCase):
         result,_=self.run_bind({'fonts':[{'path':str(self.font)}],'flowers':[{'resource_id':'same-id','cache_path':str(self.cache)}]},spec)
         self.assertTrue(any(x['kind']=='text_animation'for x in result['missing'][0]['resources']))
 
+
+    def test_cache_path_id_is_immediate_directory_only(self):
+        self.assertEqual(cache_font_id(r'C:\User Data\Cache\effect\7410300778990015027\hash\font.ttf'),'7410300778990015027')
+        self.assertEqual(cache_font_id('D:/Cache/effect/not-an-id/7410300778990015027/font.ttf'),'')
+        self.assertEqual(cache_font_id('D:/materials/7410300778990015027.ttf'),'')
+
+    def test_discovery_and_raw_cache_bind_confirmed_reference_recipe(self):
+        user=self.root/'user';font=user/'Cache/effect/7410300778990015027/hash/三极榜楷简体.ttf'
+        font.parent.mkdir(parents=True);mini_font(font,[(1,'三极榜楷简体')])
+        fx=user/'Cache/artistEffect/7543157780769803582';fx.mkdir(parents=True);(fx/'data').write_text('fixture')
+        animation=user/'Cache/effect/6908592686781960717';animation.mkdir(parents=True);(animation/'data').write_text('fixture')
+        with patch.object(batch,'discover',return_value={'user_data':str(user),'draft_roots':[]}),patch.dict(os.environ,{'WINDIR':str(self.root/'none')}):catalog=batch.resources()
+        self.assertEqual(catalog['fonts'][0]['resource_id'],'7410300778990015027')
+        self.assertEqual(catalog['fonts'][0]['identity_evidence'][0]['kind'],'cache_directory_id')
+        spec=self.recipe(id='7410300778990015027');r=spec['text_styles'][0]
+        r['styles'][0]['effectStyle']={'id':'7543157780769803582'}
+        r['animations']=[{'resource_id':'6908592686781960717','animation':{'type':'loop'}}]
+        result,out=self.run_bind(catalog,spec)
+        self.assertEqual(result['missing'],[])
+        self.assertEqual(result['font_bindings'][0]['method'],'observed_resource_id')
+        self.assertFalse(out['text_styles'][0]['verified'])
 
 if __name__=='__main__':unittest.main()

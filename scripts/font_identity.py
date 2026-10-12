@@ -16,6 +16,15 @@ from pathlib import Path
 EXTENSIONS={'.ttf','.otf','.ttc'}
 
 
+def cache_font_id(path):
+    parts=str(path).replace('\\','/').split('/')
+    for i in range(len(parts)-3):
+        if parts[i].casefold()=='cache' and parts[i+1].casefold() in ('effect','font'):
+            value=parts[i+2]
+            if re.fullmatch(r'\d{16,22}',value):return value
+    return ''
+
+
 def name_key(value):
     value=unicodedata.normalize('NFKC',str(value)).strip()
     if Path(value).suffix.lower() in EXTENSIONS:value=Path(value).stem
@@ -73,11 +82,15 @@ def _font_names(path,file_size,modified_ns):
 def font_record(path,*,resource_id=None,source='local',names=()):
     p=Path(path).expanduser().resolve();metadata=font_names(p) if p.is_file() else []
     aliases=list(dict.fromkeys([*metadata,*[str(n) for n in names if n],p.stem]))
-    rid=str(resource_id or '')
+    cached=cache_font_id(p)
+    rid=str(resource_id or cached)
+    evidence=[]
+    if resource_id:evidence.append({'kind':'draft_font_id','resource_id':str(resource_id),'source':source})
+    if cached:evidence.append({'kind':'cache_directory_id','resource_id':cached,'source':source})
     return {'name':metadata[0] if metadata else next((str(n)for n in names if n),p.stem),
             'path':str(p),'available':p.is_file(),'source':source,'font_names':metadata,
-            'aliases':aliases,'resource_id':rid,'resource_ids':[rid] if rid else [],
-            'identity_evidence':[{'kind':'draft_font_id','resource_id':rid,'source':source}] if rid else [],
+            'aliases':aliases,'resource_id':rid,'resource_ids':list(dict.fromkeys([x for x in (rid,cached) if x])),
+            'identity_evidence':evidence,
             'classification':'font_metadata' if metadata else 'font_extension'}
 
 

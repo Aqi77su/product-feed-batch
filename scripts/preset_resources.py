@@ -25,6 +25,16 @@ def bind(catalog_path,out_path,recipes_path=None):
         for e in catalog.get(kind,[]):
             rid=str(e.get('resource_id')or e.get('effect_id')or '')
             if rid and Path(e.get('cache_path','')).is_dir():found[kind][rid]=e['cache_path']
+    # Raw discovery lists have no exported style. Bind only IDs whose role and
+    # full styling are already defined by the selected reference recipes.
+    known_flower_ids={str(s['effectStyle']['id']) for r in spec['text_styles'] for s in r['styles'] if s.get('effectStyle')}
+    known_animation_ids={str(a['resource_id']) for r in spec['text_styles'] for a in r.get('animations',[])}
+    for e in catalog.get('effects',[]):
+        rid=str(e.get('id')or e.get('resource_id')or '');p=Path(e.get('path',''))
+        if not p.is_dir() or not any(p.iterdir()):continue
+        category=e.get('cache_category') or ('artistEffect' if p.parent.name.casefold()=='artisteffect' else 'effect' if p.parent.name.casefold()=='effect' else None)
+        if rid in known_flower_ids and category=='artistEffect':found['flowers'].setdefault(rid,str(p))
+        if rid in known_animation_ids and category=='effect':found['text_animations'].setdefault(rid,str(p))
     complete=[];missing=[];bindings=[]
     for original in spec['text_styles']:
         r=copy.deepcopy(original);needs=[]

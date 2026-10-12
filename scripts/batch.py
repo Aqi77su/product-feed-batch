@@ -238,7 +238,7 @@ def setup(approved):
 
 
 def resources():
-    from font_identity import collect_font_records,merge_fonts,enrich_font
+    from font_identity import collect_font_records,merge_fonts,enrich_font,font_record
     d = discover(); user = Path(d['user_data']); found = {'music': [], 'sfx': [], 'audio_candidates': [], 'fonts': [], 'effects': []}
     missing_records = []; encrypted = 0
     for category, sub, exts in [('audio_candidates', 'Cache/music', AUDIO), ('fonts', 'Cache/effect', {'.ttf', '.otf', '.ttc'}),
@@ -248,6 +248,8 @@ def resources():
         for i, f in enumerate(base.rglob('*')):
             if i > 20000: break
             if f.is_file() and f.suffix.lower() in exts:
+                if category=='fonts':
+                    found['fonts'].append(font_record(f,source='cache'));continue
                 found[category].append({'name': f.stem, 'path': str(f.resolve()), 'available': True, 'source': 'cache',
                                         'classification': 'unconfirmed_audio' if category == 'audio_candidates' else 'font_extension'})
     system = Path(os.getenv('WINDIR', 'C:/Windows')) / 'Fonts'
@@ -259,7 +261,7 @@ def resources():
         base = user / 'Cache' / category
         if base.exists():
             for f in base.iterdir():
-                if f.is_dir(): found['effects'].append({'id': f.name, 'path': str(f), 'verified': False})
+                if f.is_dir(): found['effects'].append({'id': f.name, 'path': str(f), 'cache_category':category,'verified': False})
     recent = []
     for r in d['draft_roots']:
         recent.extend(p for p in Path(r['path']).glob('*') if p.is_dir())
