@@ -317,7 +317,7 @@ def _font(font, stage):
 
 
 def _candidates(catalog, key):
-    return [x for x in catalog.get(key, []) if x.get('verified') is True and x.get('available', True)]
+    return [x for x in catalog.get(key, []) if not x.get('binding_only') and x.get('verified') is True and x.get('available', True)]
 
 
 def _choice(rng, items):

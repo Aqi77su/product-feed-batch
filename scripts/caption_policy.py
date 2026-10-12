@@ -128,12 +128,14 @@ def _validate_catalog(catalog,settings,cues,p,font):
     profile=profile_for(cues,settings)
     # Check all enabled entries before drawing; broken candidates cannot hide behind the seed.
     for entry in catalog.get('flowers',[]):
+        if entry.get('binding_only'):continue
         if entry.get('verified') is True:_effect_style(entry,_style('预检',settings,_font(font,lambda p:p)),lambda p:p)
     for entry in catalog.get('text_styles',[]):
         if entry.get('verified') is True:
             recipe_styles('样式预检',entry,lambda p:p)
             for a in entry.get('animations',[]):text_animation(a,1000000,lambda p:p)
     for entry in catalog.get('text_animations',[]):
+        if entry.get('binding_only'):continue
         if entry.get('verified') is True:text_animation(entry,1000000,lambda p:p)
     from caption_engine import _native_animation
     for entry in catalog.get('caption_animations',[]):

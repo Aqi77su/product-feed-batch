@@ -148,4 +148,36 @@ class ResourceIdentityTests(unittest.TestCase):
         with patch.object(batch,'discover',return_value={'user_data':str(user),'draft_roots':[]}),patch.dict(os.environ,{'WINDIR':str(self.root/'none')}):catalog=batch.resources()
         self.assertEqual({f['resource_id']for f in catalog['fonts']},set(fonts));self.assertEqual(len(catalog['fonts']),4)
 
+    def test_discovery_binds_all_seven_recipes_and_reference_only_entries_validate(self):
+        user=self.root/'user';root=Path(__file__).resolve().parents[1]
+        spec=json.loads((root/'presets/general-conversion/native-style-recipes.json').read_text('utf-8'))
+        for recipe in spec['text_styles']:
+            for style in recipe['styles']:
+                rid=style['font']['id'];p=user/'Cache/effect'/rid/'font.ttf';p.parent.mkdir(parents=True,exist_ok=True)
+                if not p.exists():mini_font(p,[(1,'Fixture-'+rid)])
+                if style.get('effectStyle'):
+                    p=user/'Cache/artistEffect'/style['effectStyle']['id'];p.mkdir(parents=True,exist_ok=True);(p/'data').write_text('fixture')
+            for a in recipe.get('animations',[]):
+                p=user/'Cache/effect'/a['resource_id'];p.mkdir(parents=True,exist_ok=True);(p/'data').write_text('fixture')
+        with patch.object(batch,'discover',return_value={'user_data':str(user),'draft_roots':[]}),patch.dict(os.environ,{'WINDIR':str(self.root/'none')}):catalog=batch.resources()
+        self.assertEqual(len(catalog['flowers']),6);self.assertEqual(len(catalog['text_animations']),1)
+        cp=self.root/'all.json';out=self.root/'all-bound.json';cp.write_text(json.dumps(catalog),encoding='utf-8')
+        report=bind(cp,out);bound=json.loads(out.read_text('utf-8'))
+        self.assertEqual(len(report['bound_recipes']),7);self.assertEqual(report['missing'],[])
+        bound['verified_jianying_version']='fixture'
+        for r in bound['text_styles']:r['verified']=True
+        batch.verify_catalog(bound)  # Bare discovered flowers are not executable styles.
+
+    def test_unverified_execution_is_explicit_and_does_not_mutate_source_catalog(self):
+        inv={'errors':[],'settings':{'music_enabled':False},'catalog':{'verified_jianying_version':None,
+             'text_styles':[{'name':'recipe','verified':False}],'flowers':[{'binding_only':True,'verified':False}]},'main':[],'warnings':[]}
+        with patch.object(batch,'inventory',return_value=copy.deepcopy(inv)):
+            with self.assertRaises(ValueError):batch.validate_job({})
+        with patch.object(batch,'inventory',return_value=copy.deepcopy(inv)):
+            result=batch.validate_job({'allow_unverified':True})
+        self.assertFalse(inv['catalog']['text_styles'][0]['verified'])
+        self.assertEqual(result['catalog']['text_styles'][0]['verification_basis'],'explicit_unverified_execution')
+        self.assertFalse(result['catalog']['flowers'][0]['verified'])
+        self.assertTrue(any('preview not verified'in w for w in result['warnings']))
+
 if __name__=='__main__':unittest.main()

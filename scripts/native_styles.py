@@ -16,6 +16,7 @@ from caption_engine import (CaptionError, _font, _id, _segment, _stage_nested,
 def candidates(catalog, key, role, semantic_role=None):
     result=[]
     for entry in catalog.get(key, []):
+        if entry.get('binding_only'):continue
         if entry.get('verified') is not True or entry.get('available', True) is False: continue
         roles=entry.get('roles', [entry.get('role', 'caption')])
         if key=='flowers' and roles==['inline']:roles=['caption']

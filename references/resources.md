@@ -35,6 +35,10 @@ v0.5另有text_styles（完整直接文字样式配方）与text_animations（�
 
 ## 包内提取工具
 
+v0.5.5：resources输出flowers（artistEffect目录候选）与text_animations（已确认配方引用的动画）。无完整style的发现项binding_only=true，只用于绑定；配方完整style继续执行校验，不能把ID和目录当独立花字。用户可明确使用validate/plan/run --allow-unverified（或job.allow_unverified=true）生成未预览小样：默认仍拒绝，显式开关只免视觉预览条件，不免实际路径、依赖、完整样式和词时间检查；报告记录未验证，原catalog不被写成verified=true。
+
+7套原生包装绑定成功不等于口播字幕的caption_animations、text_templates和price_badge资源完整；这些仍按实际策略检查，缺少时选择明确关闭相应策略或提供资源，不以放松包装校验掩盖口播组件缺失。
+
 v0.5.4：字体缓存扫描取消原先20000条效果目录上限，先查预设ID目录、再完整扫.ttf/.otf/.ttc；直接放在ID层和嵌套hash层均支持。resources输出preset_font_inventory（ID、目录、字体文件）、font_scan和scan_errors用于诊断；名称筛选同时匹配文件名、内部名称和aliases。目录存在却未收录时先查错误，不判成未下载。
 
 v0.5.3：字体扫描会从Cache/effect或Cache/font的紧邻数字ID目录提取resource_id并记录cache_directory_id证据。preset_resources也支持resources输出的effects列表：只把预设明确的字效ID绑定artistEffect缓存、明确的文字动画ID绑定effect缓存；目录须实际存在且非空。不改变已确认ID、不自动下载、不将绑定等同于视觉verified。旧草稿materials字体仍可按名称/明确路径绑定。

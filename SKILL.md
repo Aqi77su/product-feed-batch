@@ -40,6 +40,8 @@ AI只做一次：理解本批需求、校正文案、标注语义、确认素材
 
 ## 2. 一次收集本批输入
 
+v0.5.5资源闭环：resources直接输出flowers和已知text_animations；扫描项binding_only=true仅供配方绑定，不当独立可执行花字。配方已有完整style，无需扫描项重复携带style。所有7套绑定成功也不保证任务要求的按词字幕动画/完整口播模板齐备。用户显式接受未预览资源时，可对validate/plan/run加--allow-unverified，仍检查文件、完整样式、时间与依赖；报告标注未视觉验证，不改写原catalog的verified。不要把所有无字体effect目录认作文字动画。
+
 字体扫描优先检查预设明确ID目录，再完整扫描字体缓存；不因效果目录超过20000个条目而提前停止。查看resources中的preset_font_inventory、font_scan和scan_errors：目录存在但没有收录字体时先查扫描错误，不宣称用户未下载，也不让用户重复下载已存在字体。名称检索同时看文件名、内部字体名和aliases。
 
 已确认的默认资源ID保持原值。resources从 `Cache/effect/<ID>/<hash>/字体.ttf` 的紧邻ID目录提取字体resource_id并记录证据，不把materials的哈希当ID。预设已定义字效从artistEffect绑定，逐字放大6908592686781960717从effect绑定；任意缓存不自动进入随机白名单。俪金黑可按内部名或明确路径绑定；阳华体、喜鹊招牌体缺失时提示用户在剪映字体库下载，再重扫。绑定成功仍需原生预览验证。

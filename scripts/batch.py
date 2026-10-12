@@ -239,7 +239,7 @@ def setup(approved):
 
 def resources():
     from font_identity import collect_font_records,merge_fonts,enrich_font,font_record
-    d = discover(); user = Path(d['user_data']); found = {'music': [], 'sfx': [], 'audio_candidates': [], 'fonts': [], 'effects': []}
+    d = discover(); user = Path(d['user_data']); found = {'music': [], 'sfx': [], 'audio_candidates': [], 'fonts': [], 'effects': [], 'flowers': [], 'text_animations': []}
     missing_records = []; encrypted = 0;scan_errors=[];cache_font_scan=[]
     identities=read(ROOT/'presets/font-identities.json')['fonts']
     # Scan font files without a generic effect-entry cap. A large sticker cache
@@ -282,6 +282,17 @@ def resources():
         if base.exists():
             for f in base.iterdir():
                 if f.is_dir(): found['effects'].append({'id': f.name, 'path': str(f), 'cache_category':category,'verified': False})
+    recipes=read(ROOT/'presets/general-conversion/native-style-recipes.json')['text_styles']
+    known_animations={str(a['resource_id']):a for r in recipes for a in r.get('animations',[])}
+    for effect in found['effects']:
+        rid=effect['id'];path=effect['path']
+        if not re.fullmatch(r'\d{16,22}',rid):continue
+        if effect['cache_category']=='artistEffect':
+            found['flowers'].append({'name':'花字-'+rid,'effect_id':rid,'resource_id':rid,'cache_path':path,'verified':False,'binding_only':True})
+        elif rid in known_animations:
+            node=copy.deepcopy(known_animations[rid]);node.update(cache_path=path,verified=False,binding_only=True)
+            node.setdefault('animation',{})['path']=path
+            found['text_animations'].append(node)
     recent = []
     for r in d['draft_roots']:
         recent.extend(p for p in Path(r['path']).glob('*') if p.is_dir())
@@ -576,6 +587,7 @@ def frames(video, out, count):
 def verify_catalog(catalog):
     for k in ('flowers', 'text_intro', 'video_intro', 'video_outro'):
         for x in catalog.get(k, []):
+            if x.get('binding_only'):continue
             if x.get('verified') is not True or not catalog.get('verified_jianying_version'):
                 raise ValueError(f'{k} requires verified=true and verified_jianying_version')
             if k == 'flowers' and not x.get('effect_id'): raise ValueError('flower effect_id missing')
@@ -583,6 +595,7 @@ def verify_catalog(catalog):
             if x.get('cache_path') and not Path(x['cache_path']).is_dir(): raise ValueError('effect cache missing')
     for kind in ('caption_animations', 'text_templates', 'text_styles', 'text_animations'):
         for item in catalog.get(kind, []):
+            if item.get('binding_only'):continue
             if item.get('verified') is not True or not catalog.get('verified_jianying_version'):
                 raise ValueError(kind+' requires local verification and verified_jianying_version')
             if kind == 'text_templates' and not Path(item.get('component_path', '')).is_file(): raise ValueError('text template component missing')
@@ -592,6 +605,14 @@ def verify_catalog(catalog):
 def validate_job(job):
     inv = inventory(job)
     if inv['errors']: raise ValueError(json.dumps(inv['errors'], ensure_ascii=False))
+    if job.get('allow_unverified') is True:
+        for kind in ('flowers','text_styles','text_animations','caption_animations','text_templates'):
+            for entry in inv['catalog'].get(kind,[]):
+                if entry.get('binding_only'):continue
+                if entry.get('verified') is not True:
+                    entry['verified']=True;entry['verification_basis']='explicit_unverified_execution'
+        if not inv['catalog'].get('verified_jianying_version'):inv['catalog']['verified_jianying_version']='UNVERIFIED-user-opt-in'
+        inv['warnings'].append('Explicit --allow-unverified: native preview not verified; resources still undergo structural and path checks')
     verify_catalog(inv['catalog'])
     if inv['settings'].get('music_enabled', True) and not inv['catalog'].get('music'):
         raise ValueError('BGM requested but no confirmed usable music; select a local track or explicitly set music_enabled=false')
@@ -839,25 +860,30 @@ def main():
         a=sub.add_parser(name); a.add_argument('--out')
     a=sub.add_parser('setup'); a.add_argument('--approved',action='store_true')
     for name in ('inspect','validate','plan'):
-        a=sub.add_parser(name); a.add_argument('--job',required=True); a.add_argument('--out',required=True)
+        a=sub.add_parser(name); a.add_argument('--job',required=True); a.add_argument('--out',required=True);a.add_argument('--allow-unverified',action='store_true')
     a=sub.add_parser('detect-mode'); a.add_argument('--job',required=True); a.add_argument('--work',required=True); a.add_argument('--out',required=True)
     a=sub.add_parser('transcribe'); a.add_argument('--job',required=True); a.add_argument('--work',required=True)
     a=sub.add_parser('import-srt'); a.add_argument('--video',required=True); a.add_argument('--srt',required=True); a.add_argument('--out',required=True)
     a=sub.add_parser('frames'); a.add_argument('--video',required=True); a.add_argument('--out',required=True); a.add_argument('--count',type=int,default=8)
     a=sub.add_parser('run'); a.add_argument('--job',required=True); a.add_argument('--work',required=True); a.add_argument('--confirmed',action='store_true'); a.add_argument('--serve',action='store_true'); a.add_argument('--port',type=int,default=0)
+    a.add_argument('--allow-unverified',action='store_true')
     a=sub.add_parser('verify'); a.add_argument('--draft',required=True)
     args=p.parse_args()
+    job=None
+    if getattr(args,'job',None):
+        job=load_job(args.job)
+        if getattr(args,'allow_unverified',False):job['allow_unverified']=True
     if args.cmd=='doctor': result=doctor()
     elif args.cmd=='resources': result=resources()
     elif args.cmd=='setup': result=setup(args.approved)
     elif args.cmd=='inspect': result=inventory(load_job(args.job))
-    elif args.cmd=='validate': result=validate_job(load_job(args.job))
-    elif args.cmd=='plan': result=plan(validate_job(load_job(args.job)))
+    elif args.cmd=='validate': result=validate_job(job)
+    elif args.cmd=='plan': result=plan(validate_job(job))
     elif args.cmd=='detect-mode': result=detect_mode(load_job(args.job),args.work)
     elif args.cmd=='transcribe': result=transcribe(load_job(args.job),args.work)
     elif args.cmd=='import-srt': result=import_srt(args.video,args.srt,args.out)
     elif args.cmd=='frames': result=frames(args.video,args.out,args.count)
-    elif args.cmd=='run': result=run(load_job(args.job),args.work,args.confirmed,args.serve,args.port)
+    elif args.cmd=='run': result=run(job,args.work,args.confirmed,args.serve,args.port)
     elif args.cmd=='verify': result=verify_draft(args.draft)
     if getattr(args,'out',None) and args.cmd not in ('frames','import-srt'): write(args.out,result)
     print(json.dumps({'ok':result.get('ok',True),'data':result},ensure_ascii=False),flush=True)

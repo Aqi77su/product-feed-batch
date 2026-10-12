@@ -72,6 +72,11 @@ def bind(catalog_path,out_path,recipes_path=None):
         elif existing[r['name']].get('verified') is not True:
             existing[r['name']].clear();existing[r['name']].update(r)
         else:preserved.append(r['name'])
+    # Discovery entries are binding inputs, not standalone executable styles.
+    for entry in catalog.get('flowers',[]):
+        if not isinstance(entry.get('style'),dict):entry['binding_only']=True
+    for entry in catalog.get('text_animations',[]):
+        if not isinstance(entry.get('animation'),dict):entry['binding_only']=True
     write(out_path,catalog)
     report={'catalog_path':str(Path(out_path).resolve()),'bound_recipes':[r['name']for r in complete],
             'missing':missing,'font_bindings':bindings,'preserved_verified_recipes':preserved,'native_preview_required':True}
