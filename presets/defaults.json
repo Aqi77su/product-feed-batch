@@ -28,7 +28,7 @@
   "subtitle_max_width_ratio": 0.82,
   "subtitle_font_px_per_unit": 4.0,
   "subtitle_long_cue_policy": "error",
-  "caption_animation_mode": "auto",
+  "caption_animation_mode": "none",
   "caption_policy": "semantic",
   "caption_profile": "auto",
   "template_max_width_ratio": 0.94,
@@ -42,7 +42,7 @@
   "missing_effect_policy": "error",
   "emphasis_probability": 0.65,
   "inline_emphasis_mode": "flower",
-  "template_probability": 0.35,
+  "template_probability": 0,
   "subtitle_color": [
     1,
     1,

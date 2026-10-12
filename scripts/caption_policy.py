@@ -158,7 +158,7 @@ def _validate_catalog(catalog,settings,cues,p,font):
             modes={kw['presentation']:1} if kw.get('presentation') else p['roles'][role(kw)]
             for mode,weight in modes.items():
                 if weight<=0:continue
-                if mode=='template' and settings.get('template_probability',.35)<=0:continue
+                if mode in ('template','badge') and settings.get('template_probability',.35)<=0 and not kw.get('presentation'):continue
                 key='flowers' if mode in ('flower','whole_flower') else 'text_templates' if mode in ('template','badge') else None
                 target='price_badge' if mode=='badge' else 'caption'
                 if key and not candidates(catalog,key,target,role(kw)):
@@ -276,7 +276,8 @@ def append_semantic_captions(content,cues,settings,catalog,font,stage,rng,offset
         mode='base'
         if kw:
             choices=dict(p['roles'][role(kw)])
-            if settings.get('template_probability',.35)<=0:choices.pop('template',None)
+            if settings.get('template_probability',.35)<=0:
+                choices.pop('template',None);choices.pop('badge',None)
             mode=kw.get('presentation') or weighted(rng,choices)
             if mode not in ('base','flower','whole_flower','border','template','badge'):raise CaptionError('Invalid keyword presentation')
         if mode in ('template','badge'):

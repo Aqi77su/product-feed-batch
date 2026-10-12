@@ -238,7 +238,7 @@ def setup(approved):
 
 
 def resources():
-    from font_identity import collect_font_records,merge_fonts,enrich_font,font_record
+    from font_identity import collect_font_records,merge_fonts,enrich_font,font_record,draft_font_path
     d = discover(); user = Path(d['user_data']); found = {'music': [], 'sfx': [], 'audio_candidates': [], 'fonts': [], 'effects': [], 'flowers': [], 'text_animations': []}
     missing_records = []; encrypted = 0;scan_errors=[];cache_font_scan=[]
     identities=read(ROOT/'presets/font-identities.json')['fonts']
@@ -321,7 +321,8 @@ def resources():
             (found['fonts']if font['available']else missing_records).append(font)
     for k in ('music', 'sfx', 'audio_candidates'):
         found[k] = list({x['path']: x for x in found[k]}.values())
-    found['fonts']=[enrich_font(f)for f in merge_fonts(found['fonts'])]
+    excluded_fonts=[f for f in found['fonts']if draft_font_path(f['path'])]
+    found['fonts']=[enrich_font(f)for f in merge_fonts(found['fonts'])if not draft_font_path(f['path'])]
     classified = {str(Path(x['path']).resolve()).casefold() for k in ('music','sfx') for x in found[k]}
     found['audio_candidates'] = [x for x in found['audio_candidates'] if str(Path(x['path']).resolve()).casefold() not in classified]
     try:
@@ -340,6 +341,7 @@ def resources():
         for rid,item in identities.items()]
     return {**found, 'missing_records': missing_records, 'unreadable_recent_drafts': encrypted,
             'font_scan':cache_font_scan,'scan_errors':scan_errors,'preset_font_inventory':preset_fonts,
+            'excluded_draft_fonts':excluded_fonts,
             'note': '缓存存在不等于商用授权；效果必须另行验证，不自动进入随机集合'}
 
 

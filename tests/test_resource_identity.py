@@ -205,4 +205,24 @@ class ResourceIdentityTests(unittest.TestCase):
         self.assertIn(effect,definitions['caption_flowers']['price'])
         self.assertEqual(inner['styles'][1]['size'],inner['styles'][0]['size'])
 
+    def test_cache_font_wins_same_id_and_draft_font_is_excluded(self):
+        rid='6740499317733200388';cached=self.root/'Cache/effect'/rid/'font.ttf';cached.parent.mkdir(parents=True);cached.write_bytes(self.font.read_bytes())
+        draft=self.root/'JianyingPro Drafts/demo/materials/font.ttf';draft.parent.mkdir(parents=True);draft.write_bytes(b'other-font')
+        catalog={'fonts':[{'resource_id':rid,'path':str(draft)},{'resource_id':rid,'path':str(self.font)},{'resource_id':rid,'path':str(cached)}]}
+        result,method=resolve_font({'id':rid},catalog)
+        self.assertTrue(Path(result['path']).samefile(cached));self.assertEqual(method,'observed_resource_id')
+        result,_=resolve_font({'id':rid},{'fonts':[catalog['fonts'][0]]});self.assertIsNone(result)
+
+    def test_default_no_template_or_word_animation_requests(self):
+        from caption_engine import prepare_document,append_captions
+        import random
+        settings=batch.job_settings({'settings':{'caption_profile':'conversion','missing_effect_policy':'plain','emphasis_probability':1}})
+        self.assertEqual(settings['template_probability'],0);self.assertEqual(settings['caption_animation_mode'],'none')
+        cue={'id':'c','text':'优惠九元','start_ms':0,'end_ms':2000,'words':[],
+             'keywords':[{'text':'九元','char_start':2,'char_end':4,'start_ms':0,'end_ms':2000,'role':'price'}]}
+        cues=prepare_document({'cues':[cue]},settings)['cues'];content={'tracks':[],'materials':{}}
+        events=append_captions(content,cues,settings,{}, {'path':str(self.font)},lambda p:p,random.Random(5))
+        self.assertFalse(any(e['mode']in ('template_replace','price_badge')for e in events))
+        self.assertFalse(content['materials'].get('material_animations'))
+
 if __name__=='__main__':unittest.main()

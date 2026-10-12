@@ -35,6 +35,8 @@ v0.5另有text_styles（完整直接文字样式配方）与text_animations（�
 
 ## 包内提取工具
 
+v0.5.7：字体候选排除旧草稿materials和JianyingPro Drafts路径，排除记录保留在excluded_draft_fonts；同ID/同名字体优先Cache/effect资源目录。绑定同样禁止草稿字体（含显式路径），应选择缓存或独立字体文件。默认关闭自动口播模板及词级字幕动画，避免未提供资源时主动请求；包装原生动画与字幕花字不关闭。
+
 v0.5.6字幕花字池在general-conversion/caption-flowers.json，由native-style-recipes.json引用。35个ID按用户提供的角色分组，binding生成可执行flowers[].style（得意黑、用户指定金色、黑描边及实际字效路径），不是只有ID。此金色是显式配置，不冒充从原工程重建的全部纹理/渐变；已有完整导出style优先保留。局部字号随基础字幕；对象/人群/机会使用显式兼容池。绑定报告同时列bound_caption_flowers和missing_caption_flowers；缓存存在不会自动verified，仍支持显式未预览小样开关。
 
 v0.5.5：resources输出flowers（artistEffect目录候选）与text_animations（已确认配方引用的动画）。无完整style的发现项binding_only=true，只用于绑定；配方完整style继续执行校验，不能把ID和目录当独立花字。用户可明确使用validate/plan/run --allow-unverified（或job.allow_unverified=true）生成未预览小样：默认仍拒绝，显式开关只免视觉预览条件，不免实际路径、依赖、完整样式和词时间检查；报告记录未验证，原catalog不被写成verified=true。

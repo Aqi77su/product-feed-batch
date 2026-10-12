@@ -16,6 +16,17 @@ from pathlib import Path
 EXTENSIONS={'.ttf','.otf','.ttc'}
 
 
+def draft_font_path(path):
+    parts=str(path).replace('\\','/').casefold().split('/')
+    return 'jianyingpro drafts' in parts or 'materials' in parts
+
+
+def prefer_cache_fonts(records):
+    records=[r for r in records if not draft_font_path(r.get('path',''))]
+    cached=[r for r in records if cache_font_id(r.get('path',''))]
+    return cached or records
+
+
 def cache_font_id(path):
     parts=str(path).replace('\\','/').split('/')
     for i in range(len(parts)-3):
@@ -160,21 +171,22 @@ def _unique_file(items):
 
 
 def resolve_font(request,catalog,expected_names=()):
-    requested=str(request.get('id')or'');pool=merge_fonts([enrich_font(f)for f in catalog.get('fonts',[]) if f.get('available',True) and Path(f.get('path','')).is_file()])
+    requested=str(request.get('id')or'');pool=merge_fonts([enrich_font(f)for f in catalog.get('fonts',[]) if f.get('available',True) and not draft_font_path(f.get('path','')) and Path(f.get('path','')).is_file()])
     overrides=catalog.get('font_bindings',{})
     expected=list(dict.fromkeys([*expected_names,*request.get('names',[]),request.get('name','')]))
     override=overrides.get(requested) or next((overrides[n]for n in expected if n in overrides),None)
     if override:
         value={'path':override} if isinstance(override,str) else override
         path=Path(value.get('path',''))
+        if draft_font_path(path):raise ValueError('Draft materials fonts are excluded; select the Jianying cache or an independent font file')
         if not path.is_file():raise ValueError('Explicit font_binding file is missing')
         result=font_record(path,resource_id=value.get('resource_id'),source='explicit_font_binding')
         return result,'explicit_path'
-    if request.get('path') and Path(request['path']).is_file():
-        return font_record(request['path'],resource_id=requested,source='explicit_recipe_path'),'recipe_path'
     exact=[f for f in pool if requested and requested in {str(f.get('resource_id')or''),*map(str,f.get('resource_ids',[]))}]
-    if exact:return _unique_file(exact),'observed_resource_id'
+    if exact:return _unique_file(prefer_cache_fonts(exact)),'observed_resource_id'
+    if request.get('path') and not draft_font_path(request['path']) and Path(request['path']).is_file():
+        return font_record(request['path'],resource_id=requested,source='explicit_recipe_path'),'recipe_path'
     keys={name_key(n)for n in expected if name_key(n)}
     matches=[f for f in pool if keys.intersection(name_key(n)for n in [*f.get('font_names',[]),*f.get('aliases',[]),f.get('name','')])]
-    if matches:return _unique_file(matches),'exact_font_name'
+    if matches:return _unique_file(prefer_cache_fonts(matches)),'exact_font_name'
     return None,'missing'
