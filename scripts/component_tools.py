@@ -94,11 +94,8 @@ def extract_flower(draft, segment_id, out_path, *, style_index=None, text_materi
 
 def extract_caption_animation(draft, segment_id, out_path, *, animation_index=None):
     """Export only a referenced native caption animation, never an intro alias."""
-    doc,seg,ids=_source_segment(draft,segment_id);candidates=[]
-    for ref in dict.fromkeys(seg.get('extra_material_refs',[])):
-        kind,material=ids.get(ref,('',{}))
-        if kind=='material_animations':
-            candidates.extend(copy.deepcopy(a)for a in material.get('animations',[])if a.get('type')=='caption')
+    doc,seg,ids=_source_segment(draft,segment_id)
+    candidates=[r['animation'] for r in referenced_text_animations(doc,seg) if r['animation'].get('type')=='caption']
     if animation_index is None:
         if len(candidates)!=1:raise CaptionError('Choose --animation-index: zero or multiple native caption animations found')
         animation_index=0
@@ -129,6 +126,69 @@ def _dependencies(value, ids):
     return found
 
 
+def referenced_text_animations(doc,segment):
+    """Resolve text -> material/template children -> material_animations.
+
+    Jianying uses the container type sticker_animation for text animations too;
+    the referenced child type in/out/loop/caption determines the behavior.
+    An empty analysis-summary animations array is not proof of absent effects.
+    """
+    ids=_material_ids(doc.get('materials',{}));pending=sorted(_dependencies(segment,ids));seen=set();out=[]
+    for i,a in enumerate(segment.get('animations',[])):
+        if isinstance(a,dict):out.append({'owner_material_id':None,'animation_index':i,'animation':copy.deepcopy(a)})
+    while pending:
+        mid=pending.pop(0)
+        if mid in seen:continue
+        seen.add(mid);kind,material=ids[mid]
+        if kind=='material_animations':
+            for i,a in enumerate(material.get('animations',[])):
+                if isinstance(a,dict):out.append({'owner_material_id':mid,'animation_index':i,'container_type':material.get('type'),'animation':copy.deepcopy(a)})
+        pending.extend(sorted(_dependencies(material,ids)-seen))
+    return out
+
+
+def audit_resources(draft,out_path):
+    """Audit the source and its actual references, not a derived report's empty arrays."""
+    from font_identity import collect_font_records
+    doc=_read(draft);ids=_material_ids(doc.get('materials',{}));used=set();effects={};animations=[];segments=0
+    p=Path(draft)
+    if p.is_dir():p=next(p/n for n in ('draft_info.json','draft_content.json')if(p/n).is_file())
+    for track in doc.get('tracks',[]):
+        if track.get('type')!='text':continue
+        for segment in track.get('segments',[]):
+            segments+=1;pending=list(_dependencies(segment,ids));local=set()
+            while pending:
+                mid=pending.pop()
+                if mid in local:continue
+                local.add(mid);pending.extend(_dependencies(ids[mid][1],ids)-local)
+            used.update(local)
+            for evidence in referenced_text_animations(doc,segment):
+                a=evidence['animation']
+                animations.append({'segment_id':segment.get('id'),'text_material_id':segment.get('material_id'),
+                    'via_material_id':evidence.get('owner_material_id'),'container_type':evidence.get('container_type'),
+                    'animation_type':a.get('type'),'resource_id':str(a.get('resource_id')or a.get('id')or''),
+                    'name':a.get('name'),'cache_path':a.get('path'),'available':Path(a.get('path','')).is_dir() if a.get('path') else False})
+            for mid in local:
+                kind,mat=ids[mid]
+                if kind!='texts':continue
+                try:inner=json.loads(mat.get('content','{}'))
+                except ValueError:continue
+                for s in inner.get('styles',[]):
+                    fx=s.get('effectStyle')
+                    if fx and fx.get('id'):
+                        rid=str(fx['id']);record=effects.setdefault(rid,{'resource_id':rid,'segment_ids':[],'cache_paths':[]})
+                        if segment.get('id')not in record['segment_ids']:record['segment_ids'].append(segment.get('id'))
+                        if fx.get('path') and fx['path']not in record['cache_paths']:record['cache_paths'].append(fx['path'])
+    fonts=collect_font_records({'referenced_materials':[ids[mid][1]for mid in sorted(used)]},'explicit_draft:'+p.name,base=p.parent)
+    report={'source_file':str(p.resolve()),'source_sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
+        'scope':'all referenced text-track segments; resource inventory, not a rendered style verdict',
+        'text_segment_count':segments,'fonts':fonts,'flowers':list(effects.values()),'text_animation_references':animations,
+        'counts':{'referenced_font_paths':len(fonts),'available_font_files':sum(f['available']for f in fonts),'flower_ids':len(effects),'animation_references':len(animations)},
+        'note':'sticker_animation is a shared material container; follow its text segment reference and child animation type. Missing local files/IDs do not establish expired upstream IDs.'}
+    out=Path(out_path);out.parent.mkdir(parents=True,exist_ok=True);out.write_text(json.dumps(report,ensure_ascii=False,indent=2),'utf-8')
+    return {'report':str(out.resolve()),'source_sha256':report['source_sha256'],'counts':report['counts']}
+
+
 def extract_text_style(draft,segment_id,out_path,*,role,family='manual-general',base_style_index=None,accent_style_index=None,panel_segment_id=None):
     """Export complete direct-text styling without copy, character counts or old word times."""
     if role not in ('headline','subheadline','side_benefit','opening_hook','caption','price_badge'):
@@ -150,11 +210,11 @@ def extract_text_style(draft,segment_id,out_path,*,role,family='manual-general',
     base=base_style_index if base_style_index is not None else next((i for i,s in enumerate(styles) if plain_black(s)),0)
     accent=accent_style_index if accent_style_index is not None else next((i for i,s in enumerate(styles) if not plain_black(s)),base)
     anims=[]
-    for ref in seg.get('extra_material_refs',[]):
-        for node in ids.get(ref,('',{}))[1].get('animations',[]):
-            if node.get('type') in ('in','out','loop'):
-                node=scrub(node);anims.append({'name':node.get('name','Native text animation'),'resource_id':str(node.get('resource_id')or node.get('id')),
-                    'cache_path':node.get('path'),'animation':node})
+    for referenced in referenced_text_animations(doc,seg):
+        node=referenced['animation']
+        if node.get('type') in ('in','out','loop'):
+            node=scrub(node);anims.append({'name':node.get('name','Native text animation'),'resource_id':str(node.get('resource_id')or node.get('id')),
+                'cache_path':node.get('path'),'animation':node})
     entry={'name':'Native '+role+' style','roles':[role],'family':family,'styles':styles,'base_style':base,'accent_style':accent,
            'clip':copy.deepcopy(seg.get('clip',{})),'vertical':mat.get('typesetting')==1,
            'line_spacing':mat.get('line_spacing',.02),'animations':anims,'verified':False,'available':True,
@@ -177,7 +237,7 @@ def extract_text_style(draft,segment_id,out_path,*,role,family='manual-general',
 
 def extract_text_animation(draft,segment_id,out_path,*,animation_index=None,role='caption'):
     doc,seg,ids=_source_segment(draft,segment_id)
-    nodes=[copy.deepcopy(a)for ref in seg.get('extra_material_refs',[])for a in ids.get(ref,('',{}))[1].get('animations',[]) if a.get('type')in('in','out','loop')]
+    nodes=[r['animation']for r in referenced_text_animations(doc,seg)if r['animation'].get('type')in('in','out','loop')]
     if animation_index is None:
         if len(nodes)!=1:raise CaptionError('Choose --animation-index for the native text animation')
         animation_index=0
@@ -357,6 +417,7 @@ def main(argv=None):
     tx=subs.add_parser('extract-text-style');tx.add_argument('--draft',required=True);tx.add_argument('--segment-id',required=True);tx.add_argument('--out',required=True)
     tx.add_argument('--role',required=True);tx.add_argument('--family',default='manual-general');tx.add_argument('--base-style-index',type=int);tx.add_argument('--accent-style-index',type=int);tx.add_argument('--panel-segment-id')
     ta=subs.add_parser('extract-text-animation');ta.add_argument('--draft',required=True);ta.add_argument('--segment-id',required=True);ta.add_argument('--out',required=True);ta.add_argument('--animation-index',type=int);ta.add_argument('--role',default='caption')
+    au=subs.add_parser('audit');au.add_argument('--draft',required=True);au.add_argument('--out',required=True)
     val=subs.add_parser('validate');val.add_argument('--component',required=True)
     args=parser.parse_args(argv)
     if args.command=='extract':result=extract_component(args.draft,args.segment_id,args.out,copy_resources=not args.reference_resources)
@@ -364,6 +425,7 @@ def main(argv=None):
     elif args.command=='extract-caption-animation':result=extract_caption_animation(args.draft,args.segment_id,args.out,animation_index=args.animation_index)
     elif args.command=='extract-text-style':result=extract_text_style(args.draft,args.segment_id,args.out,role=args.role,family=args.family,base_style_index=args.base_style_index,accent_style_index=args.accent_style_index,panel_segment_id=args.panel_segment_id)
     elif args.command=='extract-text-animation':result=extract_text_animation(args.draft,args.segment_id,args.out,animation_index=args.animation_index,role=args.role)
+    elif args.command=='audit':result=audit_resources(args.draft,args.out)
     else:result=validate_component(args.component)
     print(json.dumps(result,ensure_ascii=False))
 

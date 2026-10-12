@@ -238,6 +238,7 @@ def setup(approved):
 
 
 def resources():
+    from font_identity import collect_font_records,merge_fonts,enrich_font
     d = discover(); user = Path(d['user_data']); found = {'music': [], 'sfx': [], 'audio_candidates': [], 'fonts': [], 'effects': []}
     missing_records = []; encrypted = 0
     for category, sub, exts in [('audio_candidates', 'Cache/music', AUDIO), ('fonts', 'Cache/effect', {'.ttf', '.otf', '.ttc'}),
@@ -283,8 +284,11 @@ def resources():
             elif isinstance(v, list):
                 for x in v: walk(x)
         walk(o)
-    for k in ('music', 'sfx', 'audio_candidates', 'fonts'):
+        for font in collect_font_records(o,'recent:'+directory.name,base=directory):
+            (found['fonts']if font['available']else missing_records).append(font)
+    for k in ('music', 'sfx', 'audio_candidates'):
         found[k] = list({x['path']: x for x in found[k]}.values())
+    found['fonts']=[enrich_font(f)for f in merge_fonts(found['fonts'])]
     classified = {str(Path(x['path']).resolve()).casefold() for k in ('music','sfx') for x in found[k]}
     found['audio_candidates'] = [x for x in found['audio_candidates'] if str(Path(x['path']).resolve()).casefold() not in classified]
     try:
@@ -292,7 +296,9 @@ def resources():
         for font in found['fonts']:
             try:
                 font['file_name'] = Path(font['path']).stem
-                font['name']=' '.join(ImageFont.truetype(font['path'],16).getname())
+                pil_name=' '.join(ImageFont.truetype(font['path'],16).getname())
+                if pil_name not in font['aliases']:font['aliases'].append(pil_name)
+                if not font.get('font_names'):font['name']=pil_name
             except Exception: pass
     except ImportError: pass
     return {**found, 'missing_records': missing_records, 'unreadable_recent_drafts': encrypted,

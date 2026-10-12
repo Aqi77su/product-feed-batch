@@ -8,7 +8,7 @@
   "native_style_recipes": "native-style-recipes.json",
   "caption_policy": "caption-policy.json",
   "layout_defaults": {"bundle": "native_default", "headline_enabled": true, "side_enabled": true, "start_policy": "after_opening_hook"},
-  "version": "0.5.1",
+  "version": "0.5.2",
   "requirements": ["corrected_subtitles", "semantic_broll_annotations_when_broll_is_supplied", "local_font", "verified_components_for_native_effects"],
   "evidence_summary": {
     "scope": "two_authorized_manual_projects_across_two_content_categories",

@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "fonts": {
+    "7410300778990015027": {"names": ["三极榜楷简体", "三极榜楷"]},
+    "7290457161887388219": {"names": ["阳华体", "陽華體"]},
+    "6740499317733200388": {"names": ["俪金黑", "儷金黑"]},
+    "7035914068053463565": {"names": ["喜鹊招牌体(字节试用版)", "喜鹊招牌体", "喜鵲招牌體"]},
+    "7399865900821647935": {"names": ["得意黑"]}
+  },
+  "note": "Names identify observed font families, not approved substitutions. Missing local IDs do not prove upstream IDs expired. Distinct matching files require an explicit binding."
+}

@@ -45,6 +45,7 @@ python scripts/component_tools.py extract-text-style --draft D:/任务/明文工
 python scripts/component_tools.py extract-text-style --draft D:/任务/明文工程.json --segment-id 实际竖排片段ID --role side_benefit --out D:/本机组件/侧栏/catalog.json
 python scripts/component_tools.py extract-text-animation --draft D:/任务/明文工程.json --segment-id 实际字效片段ID --role caption --out D:/本机组件/文字动画/catalog.json
 python scripts/preset_resources.py --catalog D:/任务/resources-selected.json --out D:/任务/resources-bound.json
+python scripts/component_tools.py audit --draft D:/任务/明文工程.json --out D:/任务/原始资源引用报告.json
 python scripts/component_tools.py validate --component D:/本机组件/模板/component.json
 ```
 
@@ -54,7 +55,11 @@ python scripts/component_tools.py validate --component D:/本机组件/模板/co
 
 新模板提取保存无文案的reference_text_width，换字时调整子文字框宽度，避免沿用短词固定框造成强制换行。按词模板必须回填当前真实words，不保留历史识别时间。直接样式导出支持分区底色/描边、逐行配方、独立字体、位置和原生文字动画；--base-style-index/--accent-style-index可明确新文字的基础/强调样式映射，--panel-segment-id可一起保留实际底板尺寸和颜色。
 
-内置7套native-style-recipes.json只有已去文案、去路径的样式定义。preset_resources.py按font/effect/animation资源ID绑定本机catalog，未找到的列在.binding-report.json；绑定结果verified=false，原生预览后启用，不能把绑定成功当作渲染通过。
+内置7套native-style-recipes.json只有已去文案、去路径的样式定义。字体通过已记录ID、精确内部字体名（含本地化名称）或显式路径绑定；哈希命名.ttf不会被当成字体名。resources解析字体name表及草稿content字符串内的styles.font，合并时保留ID证据；没有ID仍可使用本机字体，不伪造云端ID。默认名称对照见presets/font-identities.json。TTC只识别编译器可用的默认face，不假装可选择另一个face。
+
+同名但文件内容不同会报歧义，不能随机选。可在catalog里设置 `font_bindings: {"所请求ID": {"path":"D:/字体/已确认文件.ttf"}}` 明确指定，若是替代字体须先确认风格变化。字效和文字动画按各自资源类别绑定，同一个ID不能跨类别冒充。绑定明细、缺项/歧义在.binding-report.json；新绑定verified=false，已有verified配方保留并单独列出。没有文件不等于ID过期。
+
+audit输出原文件SHA256、已引用字体/字效以及文字→模板子项→material_animations的证据。text_segments.animations可能只是某个分析器的派生字段，不能只看它是否为空；sticker_animation是共享素材容器，需看引用者及子动画type。未提供的另一台机器不能声称已经验证。不会为了“凑35种字效”把未验证效果或错误角色加入随机池。
 
 花字/原生动画导出是可合并到resource_catalog的JSON集合。导出结果verified=false；首次先在剪映原生界面选该资源手工改字并播放检查，或检查目标版本可正常播放的已有人工来源，再根据真实记录设置verified和版本。之后用本工具生成两条小样验证整套编排。没有首次资源验证时停止，不提前谎写true破解前置条件；文件存在不等于验证。
 
