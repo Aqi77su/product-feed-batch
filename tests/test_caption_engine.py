@@ -98,7 +98,9 @@ class CaptionTests(unittest.TestCase):
         self.assertEqual(len(out['tracks'][0]['segments']),1)
         mat=out['materials']['texts'][0];inner=json.loads(mat['content'])
         self.assertEqual([s['range']for s in inner['styles']],[[0,2],[2,4],[4,6]])
-        self.assertTrue(all(s['font']['path']==str(self.font_path)for s in inner['styles']))
+        # Windows runners can expose a short-name/junction spelling for TEMP;
+        # verify the actual file identity, not one spelling of its absolute path.
+        self.assertTrue(all(Path(s['font']['path']).samefile(self.font_path)for s in inner['styles']))
         self.assertEqual(validate_caption_content(out),[]);self.assertEqual(ev[0]['start_ms'],6000)
     def test_non_bmp_characters_fail_until_native_indexing_is_verified(self):
         with self.assertRaisesRegex(CaptionError,'Non-BMP'):
