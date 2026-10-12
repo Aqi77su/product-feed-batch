@@ -7,6 +7,8 @@ description: 默认启动内置通用口播转化预设，将数字人口播与�
 
 ## 首先理解执行逻辑
 
+v0.5.8顶部标题统一有底板：优先固定manual-headline-2（浅绿底板），不再与无底板的manual-headline-1随机混用；自定义候选或明确plain退化仍补底板。每条写入后规范化整个批次Layout轨道顺序与render_index/track_render_index，HeaderPanel始终低于Headline。35个字幕花字、侧栏及开场卡定义保留；缓存字体优先、默认关闭自动模板和逐词字幕动画继续有效。
+
 v0.5.7默认：template_probability=0（不自动选择字幕模板或模板价格徽章）；caption_animation_mode=none（不自动逐词字幕动画）。原位字幕花字、顶部/侧栏的逐字放大包装动画仍保留。字体优先剪映Cache/effect目录，不把旧草稿materials/JianyingPro Drafts内字体加入自动候选；缺缓存需重扫定位，不复制易失效草稿字体。用户明确指定模板或恢复动画时仍按真实资源校验。关闭能力属于明确配置，不是降级；其他缺项如实报告。
 
 **加载本 Skill 即默认启动 `presets/general-conversion/preset.json`（通用口播转化风格），不再询问是否启用预设。** `job.preset` 可省略；脚本也会加载默认值。顶部标题、侧边利益/价格竖排默认开启，实拍原声默认关闭。显式用户覆盖优先。不限商品类别，不带入历史商品、价格或原文案。

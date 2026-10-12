@@ -2,6 +2,8 @@
 from __future__ import annotations
 import copy
 import re
+import json
+from pathlib import Path
 from caption_engine import CaptionError,clone_component,_id,_fit_caption_template
 from native_styles import candidates,render_recipe
 from layout_engine import _layout,_headline,_copy_value,_component,_append_text,_append_panel
@@ -75,6 +77,15 @@ def append_native_layout(content,item,job,settings,catalog,font,stage,rng):
         elif components and settings.get('missing_effect_policy')!='plain':raise CaptionError('No compatible native header/side style family')
     for role,obj in components:
         pool=[('recipe',e) for e in candidates(catalog,'text_styles',role)]+[('template',e) for e in candidates(catalog,'text_templates',role)]
+        if role=='headline':
+            fixed=[item for item in pool if item[1].get('name')=='manual-headline-2']
+            with_panel=[item for item in pool if item[1].get('panel') or item[1].get('name')=='manual-headline-2']
+            if fixed:pool=fixed
+            elif with_panel:pool=with_panel
+            else:
+                definitions=json.loads((Path(__file__).resolve().parents[1]/'presets/general-conversion/native-style-recipes.json').read_text('utf-8'))
+                default_panel=next(r['panel']for r in definitions['text_styles']if r['name']=='manual-headline-2')
+                pool=[(k,{**copy.deepcopy(e),'panel':default_panel})for k,e in pool]
         if family:pool=[(k,e)for k,e in pool if e.get('family','manual-general')==family]
         rng.shuffle(pool);failures=[]
         accents=obj.get('accent_ranges')
@@ -82,6 +93,8 @@ def append_native_layout(content,item,job,settings,catalog,font,stage,rng):
         for kind,entry in pool:
             try:
                 trial=copy.deepcopy(content)
+                if kind=='template' and entry.get('panel'):
+                    _append_panel(trial,entry['panel'],{**item,'start_ms':start,'duration_ms':end-start},settings)
                 if kind=='template':event=_native_component(trial,entry,obj['text'],start,end,settings,stage,role)
                 else:
                     config={k:obj[k] for k in ('x','y','size','scale','width','height','minimum_scale_ratio') if k in obj}
@@ -104,6 +117,9 @@ def append_native_layout(content,item,job,settings,catalog,font,stage,rng):
                     'size':15 if role=='side_benefit' else 13,'scale':.72 if role=='side_benefit' else 1.15,
                     'width':.12 if role=='side_benefit' else .90,'height':.6 if role=='side_benefit' else .15}
             obj={**obj,'vertical':role=='side_benefit'}
+            if role=='headline':
+                _append_panel(content,{'x':0,'y':.84,'width':.90,'height':.12,'color':'#b9f5ca'},
+                              {**item,'start_ms':start,'duration_ms':end-start},settings)
             event=_append_text(content,LABELS.get(role,role),obj,config,{**item,'start_ms':start,'duration_ms':end-start},settings,font,stage)
             event['warnings']=['Explicit plain fallback: native '+role+' styling unavailable'];events.append(event)
     # Formal copy keeps its own typography and punctuation. Existing explicit
@@ -114,4 +130,14 @@ def append_native_layout(content,item,job,settings,catalog,font,stage,rng):
     for i,o in enumerate(job.get('overlays',[])):
         if o.get('kind')=='text' and _component(o):
             events.append(_append_text(content,'TextOverlay'+str(i),o,{'x':0,'y':-.8,'size':5,'scale':1,'width':.88,'height':.14},item,settings,font,stage))
+    # Normalize the complete batch, including tracks created by earlier items.
+    tracks=content.get('tracks',[])
+    panel=next((t for t in tracks if t.get('name')=='Layout:HeaderPanel'),None)
+    if panel:
+        tracks.remove(panel)
+        first=next((i for i,t in enumerate(tracks)if t.get('name','').startswith('Layout:')),len(tracks))
+        tracks.insert(first,panel)
+        for i,t in enumerate(tracks):
+            if t.get('name','').startswith('Layout:'):
+                for seg in t.get('segments',[]):seg.update(render_index=15000+i,track_render_index=i)
     return events

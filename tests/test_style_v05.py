@@ -199,6 +199,23 @@ class StyleV05Tests(unittest.TestCase):
         self.assertLess(tracks['Layout:HeaderPanel']['segments'][0]['render_index'],tracks['Layout:Headline']['segments'][0]['render_index'])
         self.assertLess(tracks['Layout:SideBenefit']['segments'][0]['clip']['transform']['x'],0)
 
+    def test_headline_chooses_panel_recipe_and_text_renders_above_panel(self):
+        plain=self.recipe();plain['name']='manual-headline-1'
+        panel=self.recipe();panel['name']='manual-headline-2';panel['panel']={'x':0,'y':.84,'width':.85,'height':.1,'color':'#b9f5ca'}
+        catalog={'text_styles':[plain,panel]}
+        item={'start_ms':0,'duration_ms':10000,'title_candidates':['统一标题'],'side_candidates':['利益']}
+        content={'tracks':[],'materials':{}}
+        append_layout(content,item,{},self.settings,catalog,self.font,lambda p:p,random.Random(10))
+        names={t['name']:t for t in content['tracks']}
+        self.assertTrue(names['Layout:HeaderPanel']['segments'])
+        tracks=content['tracks'];panel_track=names['Layout:HeaderPanel'];tracks.remove(panel_track);tracks.append(panel_track)
+        append_layout(content,{**item,'start_ms':10000},{},self.settings,catalog,self.font,lambda p:p,random.Random(11))
+        names={t['name']:t for t in content['tracks']}
+        self.assertLess(content['tracks'].index(names['Layout:HeaderPanel']),content['tracks'].index(names['Layout:Headline']))
+        self.assertTrue(all(s['render_index']<names['Layout:Headline']['segments'][0]['render_index']for s in names['Layout:HeaderPanel']['segments']))
+        self.assertGreater(names['Layout:Headline']['segments'][0]['render_index'],names['Layout:HeaderPanel']['segments'][0]['render_index'])
+        self.assertEqual(json.loads(next(m for m in content['materials']['texts']if m['id']==names['Layout:Headline']['segments'][0]['material_id'])['content'])['text'],'统一标题')
+
     def test_base_color_animation_scheme_is_stable_within_composition(self):
         cues=[self.cue('当前口播字幕',start=1000+i*2000)for i in range(6)]
         catalog={'caption_animations':[{'name':n,'resource_id':n,'cache_path':str(self.fx),'verified':True,
