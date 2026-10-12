@@ -180,4 +180,29 @@ class ResourceIdentityTests(unittest.TestCase):
         self.assertFalse(result['catalog']['flowers'][0]['verified'])
         self.assertTrue(any('preview not verified'in w for w in result['warnings']))
 
+    def test_all_35_caption_flowers_bind_and_render_role_matched_effect(self):
+        from caption_engine import prepare_document,append_captions
+        import random
+        root=Path(__file__).resolve().parents[1]
+        definitions=json.loads((root/'presets/general-conversion/caption-flowers.json').read_text('utf-8'))
+        ids=set(rid for group in definitions['caption_flowers'].values()for rid in group)
+        self.assertEqual(len(ids),35)
+        catalog={'fonts':[{'resource_id':'7399865900821647935','path':str(self.font)}],
+                 'flowers':[{'effect_id':rid,'cache_path':str(self.cache),'verified':False,'binding_only':True}for rid in ids]}
+        cp=self.root/'pool.json';cp.write_text(json.dumps(catalog),encoding='utf-8');out=self.root/'pool-bound.json'
+        report=bind(cp,out);self.assertEqual(len(report['bound_caption_flowers']),35);self.assertEqual(report['missing_caption_flowers'],[])
+        bound=json.loads(out.read_text('utf-8'))
+        for entry in bound['flowers']:
+            self.assertIsInstance(entry['style'],dict);self.assertFalse(entry['verified']);self.assertFalse(entry['binding_only'])
+            entry['verified']=True  # Synthetic structural probe, never actual preview evidence.
+        settings=batch.job_settings({'settings':{'caption_profile':'conversion','caption_animation_mode':'none','template_probability':0,'missing_effect_policy':'plain','emphasis_probability':1}})
+        cue={'id':'c','text':'优惠九元','start_ms':0,'end_ms':2000,'words':[],
+             'keywords':[{'text':'九元','char_start':2,'char_end':4,'start_ms':1000,'end_ms':2000,'role':'price','presentation':'flower'}]}
+        cues=prepare_document({'cues':[cue]},settings)['cues'];content={'tracks':[],'materials':{}}
+        events=append_captions(content,cues,settings,bound,catalog['fonts'][0],lambda p:p,random.Random(5))
+        self.assertEqual(events[0]['mode'],'flower')
+        inner=json.loads(content['materials']['texts'][0]['content']);effect=inner['styles'][1]['effectStyle']['id']
+        self.assertIn(effect,definitions['caption_flowers']['price'])
+        self.assertEqual(inner['styles'][1]['size'],inner['styles'][0]['size'])
+
 if __name__=='__main__':unittest.main()

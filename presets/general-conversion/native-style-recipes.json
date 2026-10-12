@@ -1,5 +1,6 @@
 {
   "schema_version": "1.0",
+  "caption_flowers_file": "caption-flowers.json",
   "description": "Sanitized native styles from two authorized manual references. Bind local resources, then preview before enabling. No historical copy or paths.",
   "text_styles": [
     {

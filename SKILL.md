@@ -40,6 +40,8 @@ AI只做一次：理解本批需求、校正文案、标注语义、确认素材
 
 ## 2. 一次收集本批输入
 
+v0.5.6默认字幕花字池：caption-flowers.json收录用户指定的35个原生字效ID，按price/action/reassurance/benefit等角色选择。preset_resources同时绑定包装和字幕花字，报告分别查看bound_caption_flowers与missing_caption_flowers；新任务仍需得意黑字体。局部花字随基础字号，不将用户表中10/12号机械套用为更小的强调字。没有完整缓存时报缺/明确降级，不能把已绑定包装误当字幕花字齐备；原生预览或显式--allow-unverified才能启用。
+
 v0.5.5资源闭环：resources直接输出flowers和已知text_animations；扫描项binding_only=true仅供配方绑定，不当独立可执行花字。配方已有完整style，无需扫描项重复携带style。所有7套绑定成功也不保证任务要求的按词字幕动画/完整口播模板齐备。用户显式接受未预览资源时，可对validate/plan/run加--allow-unverified，仍检查文件、完整样式、时间与依赖；报告标注未视觉验证，不改写原catalog的verified。不要把所有无字体effect目录认作文字动画。
 
 字体扫描优先检查预设明确ID目录，再完整扫描字体缓存；不因效果目录超过20000个条目而提前停止。查看resources中的preset_font_inventory、font_scan和scan_errors：目录存在但没有收录字体时先查扫描错误，不宣称用户未下载，也不让用户重复下载已存在字体。名称检索同时看文件名、内部字体名和aliases。

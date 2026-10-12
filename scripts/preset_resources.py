@@ -17,7 +17,10 @@ def bind(catalog_path,out_path,recipes_path=None):
     from font_identity import collect_font_records,merge_fonts,resolve_font
     path=Path(catalog_path).resolve()
     catalog=resolve_catalog_paths(json.loads(path.read_text('utf-8-sig')),path.parent)
-    spec=json.loads(Path(recipes_path or ROOT/'presets/general-conversion/native-style-recipes.json').read_text('utf-8-sig'))
+    spec_path=Path(recipes_path or ROOT/'presets/general-conversion/native-style-recipes.json')
+    spec=json.loads(spec_path.read_text('utf-8-sig'))
+    flower_spec=json.loads((spec_path.parent/spec['caption_flowers_file']).read_text('utf-8-sig')) if spec.get('caption_flowers_file') else {}
+    flower_groups=flower_spec.get('caption_flowers',spec.get('caption_flowers',{}))
     identities=json.loads((ROOT/'presets/font-identities.json').read_text('utf-8'))['fonts']
     catalog['fonts']=merge_fonts([*catalog.get('fonts',[]),*collect_font_records(catalog,'explicit_catalog')])
     found={kind:{} for kind in ('flowers','caption_animations','text_animations')}
@@ -28,6 +31,7 @@ def bind(catalog_path,out_path,recipes_path=None):
     # Raw discovery lists have no exported style. Bind only IDs whose role and
     # full styling are already defined by the selected reference recipes.
     known_flower_ids={str(s['effectStyle']['id']) for r in spec['text_styles'] for s in r['styles'] if s.get('effectStyle')}
+    known_flower_ids.update(rid for group in flower_groups.values()for rid in group)
     known_animation_ids={str(a['resource_id']) for r in spec['text_styles'] for a in r.get('animations',[])}
     for e in catalog.get('effects',[]):
         rid=str(e.get('id')or e.get('resource_id')or '');p=Path(e.get('path',''))
@@ -35,7 +39,7 @@ def bind(catalog_path,out_path,recipes_path=None):
         category=e.get('cache_category') or ('artistEffect' if p.parent.name.casefold()=='artisteffect' else 'effect' if p.parent.name.casefold()=='effect' else None)
         if rid in known_flower_ids and category=='artistEffect':found['flowers'].setdefault(rid,str(p))
         if rid in known_animation_ids and category=='effect':found['text_animations'].setdefault(rid,str(p))
-    complete=[];missing=[];bindings=[]
+    complete=[];missing=[];bindings=[];bound_flowers=[];missing_flowers=[]
     for original in spec['text_styles']:
         r=copy.deepcopy(original);needs=[]
         for index,style in enumerate(r['styles']):
@@ -73,13 +77,37 @@ def bind(catalog_path,out_path,recipes_path=None):
             existing[r['name']].clear();existing[r['name']].update(r)
         else:preserved.append(r['name'])
     # Discovery entries are binding inputs, not standalone executable styles.
+    if flower_groups:
+        font_request=flower_spec.get('style',{}).get('font',{'id':'7399865900821647935'})
+        font,font_method=resolve_font(font_request,catalog,identities.get(font_request.get('id'),{}).get('names',[]))
+        ids=list(dict.fromkeys(rid for group in flower_groups.values()for rid in group))
+        for rid in ids:
+            if not font or rid not in found['flowers']:
+                missing_flowers.append({'effect_id':rid,'reason':'subtitle_font_missing' if not font else 'effect_cache_missing'});continue
+            style=copy.deepcopy(flower_spec.get('style',{}))
+            if not style:raise ValueError('Caption flowers need an explicit full style definition')
+            style['font']={'id':font_request['id'] if font_request['id'] in font.get('resource_ids',[]) else str(font.get('resource_id')or''),'path':font['path']}
+            style['effectStyle']={'id':rid,'path':found['flowers'][rid]}
+            roles=[role for role,group in flower_groups.items()if rid in group]
+            entry={'name':'字幕花字-'+rid,'effect_id':rid,'resource_id':rid,'cache_path':found['flowers'][rid],
+                   'style':style,'role':'caption','semantic_roles':roles,'verified':False,'binding_only':False,
+                   'style_basis':'user-configured gold subtitle style','verification_note':'Bound local resource; native preview required.'}
+            existing_flower=next((e for e in catalog.get('flowers',[])if str(e.get('effect_id')or e.get('resource_id'))==rid),None)
+            if existing_flower and isinstance(existing_flower.get('style'),dict):
+                existing_flower.setdefault('semantic_roles',roles)
+                existing_flower['binding_only']=False
+            elif existing_flower:existing_flower.clear();existing_flower.update(entry)
+            else:catalog.setdefault('flowers',[]).append(entry)
+            bound_flowers.append(rid)
+        catalog['caption_flowers']=flower_groups
     for entry in catalog.get('flowers',[]):
         if not isinstance(entry.get('style'),dict):entry['binding_only']=True
     for entry in catalog.get('text_animations',[]):
         if not isinstance(entry.get('animation'),dict):entry['binding_only']=True
     write(out_path,catalog)
     report={'catalog_path':str(Path(out_path).resolve()),'bound_recipes':[r['name']for r in complete],
-            'missing':missing,'font_bindings':bindings,'preserved_verified_recipes':preserved,'native_preview_required':True}
+            'missing':missing,'bound_caption_flowers':bound_flowers,'missing_caption_flowers':missing_flowers,
+            'font_bindings':bindings,'preserved_verified_recipes':preserved,'native_preview_required':True}
     write(Path(out_path).with_suffix('.binding-report.json'),report)
     return report
 
