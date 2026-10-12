@@ -1,6 +1,6 @@
 interface:
   display_name: "产品信息流批量剪辑"
-  short_description: "一次校正文案与语义剪点，按通用风格批量生成可编辑剪映草稿"
-  default_prompt: "加载 $product-feed-batch，先检测剪映环境，再收集本批素材与生产数量。"
+  short_description: "默认预设、顶部标题与侧栏；实拍静音，按语义批量生成剪映草稿"
+  default_prompt: "加载 $product-feed-batch，默认启用通用口播转化预设、顶部标题和侧栏，先检测环境与本机资源，再收集本批素材和生产数量。"
 policy:
   allow_implicit_invocation: true

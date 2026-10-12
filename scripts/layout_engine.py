@@ -230,6 +230,9 @@ def _append_panel(content, config, item, settings):
 
 def append_layout(content, item, job, settings, catalog, font, stage, rng):
     """Append one item's explicit persistent components to a saved raw draft."""
+    if settings.get('layout_style')=='native':
+        from native_layout import append_native_layout
+        return append_native_layout(content,item,job,settings,catalog,font,stage,rng)
     layout = _layout(job, settings)
     enabled = layout.get("enabled", True) is not False
     if not enabled:

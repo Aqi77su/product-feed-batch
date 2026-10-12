@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "min_gap_s": 1.5,
+  "repeat_gap_s": 8,
+  "direct_animation_probability": 0.35,
+  "profiles": {
+    "explainer": {"animations": {"逐词显色": 1}, "base_colors": {"white": 1}, "schemes": [{"animation":"逐词显色","color":"white","weight":1}]},
+    "conversion": {"animations": {"逐词显色": 0.54, "下划线": 0.16, "none": 0.30}, "base_colors": {"white": 0.70, "gold": 0.30},
+      "schemes": [
+        {"animation":"逐词显色","color":"white","weight":0.54},
+        {"animation":"下划线","color":"gold","weight":0.16},
+        {"animation":"none","color":"white","weight":0.16},
+        {"animation":"none","color":"gold","weight":0.14}
+      ]}
+  },
+  "roles": {
+    "audience": {"flower": 0.5, "border": 0.5},
+    "opportunity": {"whole_flower": 0.4, "flower": 0.3, "border": 0.3},
+    "object": {"template": 0.55, "border": 0.30, "flower": 0.15},
+    "price": {"template": 0.40, "flower": 0.25, "border": 0.25, "badge": 0.10},
+    "benefit": {"flower": 0.55, "border": 0.30, "whole_flower": 0.15},
+    "reassurance": {"border": 0.7, "flower": 0.3},
+    "action": {"whole_flower": 0.35, "flower": 0.4, "template": 0.25}
+  },
+  "note": "Profile animation/color weights summarize observed manual usage; role weights and spacing are configurable batch rules, not a claim of measured causal probabilities."
+}

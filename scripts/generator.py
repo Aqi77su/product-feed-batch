@@ -108,7 +108,7 @@ def build(job, inv, resolved, work, state, io):
             script.add_segment(video(settings['background']['path'], offset, duration), 'Background')
         for clip in item['broll']:
             seg = video(clip['path'], offset+clip['start_ms'], clip['duration_ms'], clip['source_start_ms'],
-                        clip=settings['broll_transform'])
+                        volume=settings.get('broll_volume', 0.0), clip=settings['broll_transform'])
             script.add_segment(seg, 'Broll')
         for index, overlay in enumerate(image_overlays):
             script.add_segment(video(overlay['path'], offset, duration, clip=overlay.get('transform', {})), 'ImageOverlay'+str(index))

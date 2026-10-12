@@ -5,6 +5,7 @@
   "fps": 30,
   "main_speed": 1.1,
   "main_volume": 1.0,
+  "broll_volume": 0.0,
   "seed": 20261010,
   "opening_no_broll_s": 0,
   "ending_no_broll_s": 0,
@@ -23,11 +24,21 @@
   "base_font_size": 14,
   "subtitle_scale": 1.15,
   "subtitle_y": -0.3645833333,
-  "subtitle_max_cjk_chars": 13,
+  "subtitle_max_cjk_chars": null,
   "subtitle_max_width_ratio": 0.82,
   "subtitle_font_px_per_unit": 4.0,
   "subtitle_long_cue_policy": "error",
   "caption_animation_mode": "auto",
+  "caption_policy": "semantic",
+  "caption_profile": "auto",
+  "template_max_width_ratio": 0.94,
+  "layout_style": "native",
+  "layout_options": {
+    "headline_enabled": true,
+    "side_enabled": true,
+    "start_policy": "after_opening_hook",
+    "bundle": "native_default"
+  },
   "missing_effect_policy": "error",
   "emphasis_probability": 0.65,
   "inline_emphasis_mode": "flower",
@@ -37,21 +48,12 @@
     1,
     1
   ],
-  "keyword_color": [
-    1,
-    0.82,
-    0
-  ],
-  "keyword_font_size": 7,
-  "keyword_y": -0.5,
-  "title_y": 0.78,
-  "title_font_size": 7,
+  "keyword_color": null,
   "music_volume": 0.36,
   "music_enabled": true,
   "sfx_volume": 0.25,
   "sfx_mode": "keywords",
   "sfx_min_gap_s": 1.5,
-  "animation_probability": 0.6,
   "keyword_popup_probability": 0,
   "background": {
     "mode": "none"

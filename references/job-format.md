@@ -1,4 +1,4 @@
-# 任务和命令协议 · v0.4
+# 任务和命令协议 · v0.5
 
 AI负责把自然语言整理成下面结构，不要求非专业用户手填。路径使用绝对路径；内置preset名称除外。
 
@@ -17,7 +17,7 @@ AI负责把自然语言整理成下面结构，不要求非专业用户手填。
   "subtitles":{},
   "resource_catalog":"D:/任务/resources-selected.json",
   "layout":{
-    "bundle":"auto",
+    "bundle":"native_default",
     "headline":"用户确认的持续标题",
     "subheadline":"当前任务利益信息",
     "side_benefit":{"text":"当前任务短利益点","side":"right"},
@@ -28,7 +28,7 @@ AI负责把自然语言整理成下面结构，不要求非专业用户手填。
 }
 ```
 
-layout里的槽位全部可省略；不替用户编内容。标题候选也可由corrected文档传入。bundle支持auto/plain/header/header_panel；auto在兼容整套布局中选择，有标题才创建顶部组件。side_benefit真实竖排，支持left/right。必要说明保留标点、换行。旧title/titles及overlays(kind=image/text)仍支持；不能同时重复配置同一信息。
+顶部和侧栏默认启用。标题候选可由corrected.title_candidates传入，侧栏由side_benefit/side_candidates或已校正关键词提供；缺合法内容会报错，不替用户编造。headline_enabled=false/side_enabled=false可分别关闭；layout.enabled=false关闭自动包装。默认native_default使用完整原生样式族，start_policy=after_opening_hook。旧header/header_panel仅在显式settings.layout_style=legacy下保留。side_benefit可指定left/right；声明保留标点、换行。旧title/titles及overlays仍支持，不重复配置同一信息。
 
 main_videos/broll可为目录、文件或路径数组，按内容哈希去重。broll_assets用path或asset_id匹配盘点条目；tags须真实；usable_ranges为源绝对毫秒合法窗，[]表示没有可用区间。未提供broll但提供broll_assets路径时可直接盘点这些文件。
 
@@ -41,14 +41,16 @@ count是本批总条数。单人口播可用distribution（所有source_id→非
 通用默认：1080×1920/30fps、1.1倍口播、白色得意黑14号/scale1.15/y约-.365；720×1280自动采用13号/y-.390625，显式字号位置优先。其他画布需另行标定。所有支持字段见presets/defaults.json。
 
 - main_speed、main_volume可覆盖；不照搬历史9–10倍音量。ASR永远声明实际源时基，程序统一缩放。
+- broll_volume=0：脚本明确写入实拍片段，默认关闭素材原声；用户显式设置非零才保留相应音量。
 - broll_mode默认semantic；count/ratio只作为用户显式选择的旧兼容模式，报告会提示不使用语义窗。
 - broll_boundary_policy默认within_segment；opening_no_broll_s/ending_no_broll_s默认0，语义人物优先区控制开头收尾，用户显式秒数是硬约束。
 - broll_count为语义模式软目标范围；broll_duration_s是未在机会中指定时的长度范围，不允许为凑目标越界。
 - music_enabled=true，空音乐池会阻止生产；用户明确关闭时设false。music_volume=.36，music_source_start_s=0，music_loop=false，music_fade_in_s=0，music_fade_out_s=1.6。短歌默认reject，明确allow_silence才播完留静音。
-- caption_animation_mode=auto：有真实words时请求原生字幕动画，无words时记录跳过；word要求可靠words；none明确不用。
-- inline_emphasis_mode=flower请求完整花字样式；border是合法的原位描边方案。template_probability默认.35，设0明确不用整句模板。
+- caption_policy=semantic默认使用[v0.5风格契约](style-v05.md)；caption_profile=auto|explainer|conversion。auto依据price角色分流；每篇corrected可明确profile。
+- caption_animation_mode=auto按profile分配原生动画或无动画；word要求可靠words；none关闭基础词级动画。选用按词模板仍必须有真实words。
+- template_probability=0关闭自动模板接替候选；大于0时semantic模式按角色权重选模板，具体权重用caption_policy_overrides.roles覆盖。旧全句概率及inline_emphasis_mode仅对caption_policy=legacy生效。
 - missing_effect_policy=error默认拒绝缺请求资源；plain显式接受降级并记录。不能靠空catalog悄悄关闭效果。
-- subtitle_long_cue_policy=error默认拒绝无可靠时间的长句；approximate_equal明确接受句级近似，绝非逐词对齐。
+- subtitle_max_cjk_chars=null默认无固定字数上限。语义模式根据选中样式测宽，保护关键词；长句缺可靠词时间时要求对齐。approximate_equal仅在显式legacy模式兼容，绝非逐词对齐。
 - keyword_popup_probability已废弃：不再生成复制的Emphasis轨，即使旧job设置它也只警告。
 - sfx_mode=keywords默认跟实际重点事件；none关闭；every_cue只保留为显式旧选项。
 - background默认none；image/blur仅显式任务启用，不自动抠人或随机背景。

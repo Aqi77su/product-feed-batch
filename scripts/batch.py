@@ -326,7 +326,7 @@ def job_settings(job):
         v = settings[key]
         if len(v) != 2 or not 0 <= v[0] <= v[1]: raise ValueError(key)
     if settings['broll_ratio'][1] > 1 or settings['broll_duration_s'][0] <= 0: raise ValueError('invalid broll range')
-    for key in ('music_volume', 'sfx_volume', 'animation_probability', 'keyword_popup_probability'):
+    for key in ('music_volume', 'sfx_volume', 'keyword_popup_probability'):
         if not 0 <= settings[key] <= 1: raise ValueError(key)
     if settings['sfx_mode'] not in ('none', 'keywords', 'every_cue'): raise ValueError('sfx_mode')
     if settings['background']['mode'] not in ('none', 'blur', 'image'): raise ValueError('background.mode')
@@ -351,8 +351,11 @@ def job_settings(job):
         if not 0 <= settings[key] <= 1: raise ValueError(key)
     for key in ('subtitle_color', 'keyword_color'):
         value = settings[key]
+        if key == 'keyword_color' and value is None: continue
         if not isinstance(value, list) or len(value) != 3 or any(not isinstance(c,(int,float)) or not math.isfinite(c) or not 0<=c<=1 for c in value): raise ValueError(key+' requires normalized RGB')
     y = settings['subtitle_y']
+    if not isinstance(settings.get('broll_volume',0), (int,float)) or not 0 <= settings.get('broll_volume',0) <= 1:
+        raise ValueError('broll_volume must be between 0 and 1')
     caption_height = settings['base_font_size']*settings['subtitle_font_px_per_unit']*settings['width']/1080*settings['subtitle_scale']*1.4
     if not isinstance(y,(int,float)) or not math.isfinite(y) or abs(y)+caption_height/settings['height']>.99: raise ValueError('subtitle_y/font size places ordinary captions outside the safe canvas')
     return settings
@@ -545,7 +548,7 @@ def verify_catalog(catalog):
             if k == 'flowers' and not x.get('effect_id'): raise ValueError('flower effect_id missing')
             if k != 'flowers' and not x.get('enum'): raise ValueError('animation enum missing')
             if x.get('cache_path') and not Path(x['cache_path']).is_dir(): raise ValueError('effect cache missing')
-    for kind in ('caption_animations', 'text_templates'):
+    for kind in ('caption_animations', 'text_templates', 'text_styles', 'text_animations'):
         for item in catalog.get(kind, []):
             if item.get('verified') is not True or not catalog.get('verified_jianying_version'):
                 raise ValueError(kind+' requires local verification and verified_jianying_version')
@@ -560,6 +563,7 @@ def validate_job(job):
     if inv['settings'].get('music_enabled', True) and not inv['catalog'].get('music'):
         raise ValueError('BGM requested but no confirmed usable music; select a local track or explicitly set music_enabled=false')
     inv['documents'] = {}
+    inv['layout_job']={k:copy.deepcopy(job[k])for k in ('layout','titles','title','title_candidates','overlays')if k in job}
     for x in inv['main']:
         if not inv.get('assembly') and inv['distribution'][x['id']] == 0: continue
         p = job.get('subtitles', {}).get(x['id'])
@@ -577,6 +581,7 @@ def validate_job(job):
         # catches missing requested resources, bad template dependencies and
         # unsafe text geometry during validate/plan, not halfway through a batch.
         inv['warnings'].extend(inv['documents'][x['id']].get('warnings', []))
+        if inv['settings'].get('caption_policy')=='semantic':continue
         for candidate_font in inv['catalog'].get('fonts', [None]):
             inv['warnings'].extend(validate_requested_resources(inv['documents'][x['id']]['cues'], inv['settings'],
                 inv['catalog'], candidate_font, lambda path: str(Path(path).resolve())))
@@ -592,6 +597,10 @@ def validate_job(job):
                     data=read(job['subtitles'][source_id])
                     if data.get('script_id')!=group['script_id'] or data.get('section_id')!=section['section_id']:
                         raise ValueError('Corrected subtitle script_id/section_id differ from confirmed assembly: '+source_id)
+    if inv['main'] and inv['settings'].get('caption_policy')=='semantic':
+        inv['_preflight_native']=True
+        checked=plan(inv)
+        inv['preflight_summary']={'count':len(checked['items']),'all_variants_compiled':True}
     return inv
 
 
@@ -751,7 +760,7 @@ def verify_draft(directory,resolved=None):
                 local=start-item['start_ms']*1000
                 if local<resolved['settings']['opening_no_broll_s']*1e6 or end>(item['start_ms']+item['duration_ms'])*1000-resolved['settings']['ending_no_broll_s']*1e6:
                     errors.append('Broll inside protected opening/ending')
-                if seg.get('volume')!=0: errors.append('Broll not muted')
+                if seg.get('volume')!=resolved['settings'].get('broll_volume',0): errors.append('Broll volume differs from explicit policy (default muted)')
                 source=seg.get('source_timerange',{}); mat=videos.get(seg['material_id'],{})
                 if source.get('start',0)+source.get('duration',0)>mat.get('duration',0)+40000: errors.append('Broll exceeds source')
                 if resolved['settings'].get('broll_boundary_policy') == 'within_segment':

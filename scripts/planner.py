@@ -71,7 +71,7 @@ def plan(inv, io):
         seed = hashlib.sha256(f"{settings['seed']}:{script_id}:{combination}:{number}".encode()).hexdigest()
         rng = random.Random(seed)
         parts, documents, duration = [], {}, 0
-        captions, titles, timing_warnings = [], [], []
+        captions, titles, sides, timing_warnings = [], [], [], []
         for source_id in ids:
             source = sources[source_id]
             length = round(source['duration_ms']/settings['main_speed'])
@@ -90,6 +90,7 @@ def plan(inv, io):
                 cue['id'] = source_id+':'+cue['id']
                 captions.append(cue)
             titles.extend(mapped.get('title_candidates', []))
+            sides.extend(mapped.get('side_candidates', []))
             duration += length
         if settings['broll_mode'] == 'semantic':
             planned = plan_semantic_broll(parts, documents, inv['broll'], settings, rng)
@@ -97,17 +98,28 @@ def plan(inv, io):
             planned = _legacy_broll(parts, inv['broll'], settings, rng, duration)
         music = choose_music(catalog.get('music', []) if settings.get('music_enabled', True) else [], duration, settings, music_state, master)
         fonts = catalog.get('fonts', [])
+        preferred=settings.get('preferred_fonts',[])
+        preferred_pool=[f for f in fonts if any(n in (f.get('name','')+' '+str(f.get('path',''))) for n in preferred)]
+        if preferred_pool:fonts=preferred_pool
         if not fonts:
             raise ValueError('A readable local font is required; backend default font is not a faithful fallback')
         clips = planned['clips']
         item = {'number': number, 'script_id': script_id, 'source_id': ids[0], 'source_path': parts[0]['path'],
                 'segments': parts, 'combination_index': combination, 'variant': number, 'seed': seed,
                 'start_ms': offset, 'duration_ms': duration, 'captions': captions,
-                'title_candidates': titles, 'broll': clips, 'broll_opportunities': planned['opportunities'],
+                'title_candidates': titles, 'side_candidates':sides,'broll': clips, 'broll_opportunities': planned['opportunities'],
                 'music': music, 'font': rng.choice(fonts),
                 'warnings': timing_warnings+planned['warnings'],
                 'effective_broll_ratio': round(sum(c['duration_ms'] for c in clips)/duration, 4)}
         items.append(item)
+        if inv.get('_preflight_native'):
+            from caption_engine import append_captions
+            from layout_engine import append_layout
+            scratch={'tracks':[],'materials':{}}
+            ev=append_captions(scratch,captions,settings,catalog,item['font'],lambda p:p,random.Random(seed+':caption'),offset_ms=offset)
+            lv=append_layout(scratch,item,inv.get('layout_job',{}),settings,catalog,item['font'],lambda p:p,random.Random(seed+':layout'))
+            item['preflight']={'subtitle_segments':len(ev),'layout_roles':[e.get('component')for e in lv]}
+            item['warnings'].extend(w for e in ev+lv for w in e.get('warnings',[]))
         offset += duration
     return {'schema_version': '1.1', 'items': items, 'duration_ms': offset, 'settings': settings,
             'semantic_annotations_reused': True, 'music_usage': music_state.get('music_usage', {})}

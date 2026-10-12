@@ -57,7 +57,8 @@ class PipelineTests(unittest.TestCase):
             cls.main_paths.append(target)
         cls.broll = cls.workspace / "product.mp4"
         cls._ffmpeg("-f", "lavfi", "-i", "testsrc2=s=180x320:r=25:d=8",
-                    "-an", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(cls.broll))
+                    "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000:duration=8",
+                    "-c:a", "aac", "-shortest", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(cls.broll))
         cls.music = []
         for number, tone in enumerate((220, 330)):
             path = cls.workspace / f"music-{number}.wav"
@@ -172,6 +173,7 @@ class PipelineTests(unittest.TestCase):
                                   "usable_ranges": [{"start_ms": 0, "end_ms": 6000}]}],
                "subtitles": subtitles, "resource_catalog": str(catalog_path), "draft_root": str(self.drafts),
                "settings": {"main_speed": 1.1, "main_volume": 1.0, "broll_mode": "semantic",
+                            "caption_policy": "legacy", "layout_style": "legacy",
                             "broll_count": [2, 2] if splice else [1, 1], "broll_ratio": [.9, .9],
                             "opening_no_broll_s": .5, "ending_no_broll_s": .5,
                             "music_selection": "balanced_shuffle", "music_volume": .36,
@@ -199,6 +201,52 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         self.assertFalse((draft / "INCOMPLETE.json").exists())
         return draft, self.batch.read(draft / "draft_info.json"), self.batch.read(draft / "batch-resolved-plan.json")
+
+    def test_v05_native_defaults_splice_timed_template_and_audible_broll(self):
+        job=self._job('v05-native',splice=True,template=True)
+        job['settings'].update(caption_policy='semantic',caption_profile='conversion',layout_style='native',
+                               missing_effect_policy='error',caption_animation_mode='auto')
+        catalog=self.batch.read(job['resource_catalog'])
+        cache=self.workspace/'v05-native-resource';cache.mkdir(exist_ok=True);(cache/'resource.json').write_text('{}')
+        catalog['caption_animations']=[{'name':name,'resource_id':name,'cache_path':str(cache),'verified':True,
+            'role':'caption','animation':{'type':'caption'}}for name in ('逐词显色','下划线')]
+        st={'range':[0,8],'size':13,'font':{'id':'fixture-font','path':str(self.font)},
+            'fill':{'content':{'render_type':'solid','solid':{'color':[1,1,1]}}},'strokes':[{'width':.08,'content':{'solid':{'color':[0,0,0]}}}]}
+        catalog['text_styles']=[]
+        for role,x,y,size,scale in [('headline',0,.88,13,1.15),('subheadline',0,.73,11,1.095),('side_benefit',.843,.124,15,.72)]:
+            ss=copy.deepcopy(st);ss['size']=size
+            catalog['text_styles'].append({'name':'Synthetic '+role,'roles':[role],'verified':True,'styles':[ss],
+                'clip':{'scale':{'x':scale,'y':scale},'transform':{'x':x,'y':y}},'vertical':role=='side_benefit',
+                'animations':[{'resource_id':'loop','cache_path':str(cache),'animation':{'type':'loop','duration':1000000}}]})
+        cp=pathlib.Path(catalog['text_templates'][0]['component_path']);component=self.batch.read(cp)
+        component['materials']['text_templates'][0]['type']='text_template_subtitle'
+        component['materials']['material_animations']=[{'id':'WORDANIM','type':'sticker_animation','animations':[{'type':'caption','resource_id':'word','path':str(cache),'duration':3000000}]}]
+        component['segment']['extra_material_refs']=['WORDANIM'];write_json(cp,component)
+        write_json(job['resource_catalog'],catalog)
+        for path in job['subtitles'].values():
+            doc=self.batch.read(path)
+            doc['cues'][1]['keywords'][0].update(role='core_object',presentation='template')
+            write_json(path,doc)
+        # Exercise defaults: no manual header/side enable flags, no broll volume override.
+        self.assertNotIn('broll_volume',job['settings'])
+        draft,content,resolved=self._execute(job)
+        self.assertTrue(self.batch.probe(self.broll)['audio'])
+        self.assertEqual(resolved['settings']['broll_volume'],0)
+        tracks={t['name']:t for t in content['tracks']}
+        self.assertTrue(all(s['volume']==0 for s in tracks['Broll']['segments']))
+        for role in ('Headline','Subheadline','SideBenefit'):
+            self.assertEqual(len(tracks['Layout:'+role]['segments']),2)
+            self.assertTrue(all(s['extra_material_refs'] for s in tracks['Layout:'+role]['segments']))
+        idx={m['id']:m for vals in content['materials'].values()for m in vals if isinstance(m,dict)and'id'in m}
+        templates=[s for s in tracks['Subtitles']['segments']if idx[s['material_id']].get('text_info_resources')]
+        self.assertTrue(templates)
+        for seg in templates:
+            m=idx[idx[seg['material_id']]['text_info_resources'][0]['text_material_id']]
+            self.assertEqual(json.loads(m['content'])['text'],'实用')
+            self.assertEqual(m['words']['text'],['实用'])
+            self.assertEqual(m['words']['start_time'],[0])
+            self.assertEqual(m['words']['end_time'],[1000])
+        self.assertTrue(all(i['preflight']['layout_roles'] for i in resolved['items']))
 
     def _assert_common(self, draft, content, resolved):
         tracks = {x.get("name"): x for x in content["tracks"]}

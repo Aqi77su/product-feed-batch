@@ -1,0 +1,776 @@
+{
+  "schema_version": "1.0",
+  "description": "Sanitized native styles from two authorized manual references. Bind local resources, then preview before enabling. No historical copy or paths.",
+  "text_styles": [
+    {
+      "name": "manual-headline-1",
+      "roles": [
+        "headline"
+      ],
+      "family": "manual-general",
+      "styles": [
+        {
+          "fill": {
+            "content": {
+              "render_type": "gradient",
+              "gradient": {
+                "angle": 107,
+                "color": [
+                  [
+                    0.9960784316062927,
+                    1,
+                    0.32549020648002625
+                  ],
+                  [
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0.9960784316062927,
+                    1,
+                    0.26274511218070984
+                  ]
+                ],
+                "alpha": [
+                  1,
+                  1,
+                  1
+                ],
+                "percent": [
+                  0.7163716554641724,
+                  0.524336278438568,
+                  0.35176992416381836
+                ],
+                "mode": "character"
+              }
+            }
+          },
+          "font": {
+            "id": "7410300778990015027"
+          },
+          "size": 15,
+          "effectStyle": {
+            "id": "7543157780769803582"
+          }
+        }
+      ],
+      "base_style": 0,
+      "accent_style": 0,
+      "clip": {
+        "scale": {
+          "x": 1,
+          "y": 1
+        },
+        "transform": {
+          "x": 0,
+          "y": 0.841897233201581
+        },
+        "flip": {}
+      },
+      "vertical": false,
+      "line_spacing": 0.02,
+      "animations": [
+        {
+          "name": "逐字放大",
+          "resource_id": "6908592686781960717",
+          "animation": {
+            "id": "6908592686781960717",
+            "type": "loop",
+            "duration": 1833333,
+            "resource_id": "6908592686781960717",
+            "third_resource_id": "6908592686781960717",
+            "source_platform": 1,
+            "name": "逐字放大",
+            "material_type": "sticker"
+          }
+        }
+      ],
+      "safe_width": 0.94,
+      "safe_height": 0.9,
+      "minimum_scale_ratio": 0.85,
+      "verified": false,
+      "binding_required": true
+    },
+    {
+      "name": "manual-side_benefit-1",
+      "roles": [
+        "side_benefit"
+      ],
+      "family": "manual-general",
+      "styles": [
+        {
+          "fill": {
+            "alpha": 1,
+            "content": {
+              "render_type": "solid",
+              "solid": {
+                "alpha": 1,
+                "color": [
+                  1,
+                  1,
+                  1
+                ]
+              }
+            }
+          },
+          "font": {
+            "id": "7290457161887388219"
+          },
+          "size": 15,
+          "strokes": [
+            {
+              "alpha": 1,
+              "content": {
+                "render_type": "solid",
+                "solid": {
+                  "alpha": 1,
+                  "color": [
+                    0,
+                    0,
+                    0
+                  ]
+                }
+              },
+              "width": 0.07999999821186066
+            }
+          ],
+          "useLetterColor": true
+        },
+        {
+          "fill": {
+            "alpha": 1,
+            "content": {
+              "render_type": "solid",
+              "solid": {
+                "alpha": 1,
+                "color": [
+                  1,
+                  1,
+                  1
+                ]
+              }
+            }
+          },
+          "font": {
+            "id": "7290457161887388219"
+          },
+          "size": 15,
+          "strokes": [
+            {
+              "alpha": 1,
+              "content": {
+                "render_type": "solid",
+                "solid": {
+                  "alpha": 1,
+                  "color": [
+                    1,
+                    0.0941176488995552,
+                    0.21568627655506134
+                  ]
+                }
+              },
+              "width": 0.07999999821186066
+            }
+          ],
+          "useLetterColor": true
+        }
+      ],
+      "base_style": 0,
+      "accent_style": 1,
+      "clip": {
+        "scale": {
+          "x": 0.7722179010745254,
+          "y": 0.7722179010745254
+        },
+        "transform": {
+          "x": -0.8491228070175438,
+          "y": 0.18774703557312256
+        },
+        "flip": {}
+      },
+      "vertical": true,
+      "line_spacing": 0.02,
+      "animations": [
+        {
+          "name": "逐字放大",
+          "resource_id": "6908592686781960717",
+          "animation": {
+            "id": "6908592686781960717",
+            "type": "loop",
+            "duration": 933333,
+            "resource_id": "6908592686781960717",
+            "third_resource_id": "6908592686781960717",
+            "source_platform": 1,
+            "name": "逐字放大",
+            "material_type": "sticker"
+          }
+        }
+      ],
+      "safe_width": 0.94,
+      "safe_height": 0.9,
+      "minimum_scale_ratio": 0.85,
+      "verified": false,
+      "binding_required": true
+    },
+    {
+      "name": "manual-side_benefit-2",
+      "roles": [
+        "side_benefit"
+      ],
+      "family": "manual-general",
+      "styles": [
+        {
+          "fill": {
+            "content": {
+              "render_type": "solid",
+              "solid": {
+                "color": [
+                  1,
+                  1,
+                  1
+                ]
+              }
+            }
+          },
+          "font": {
+            "id": "7290457161887388219"
+          },
+          "strokes": [
+            {
+              "content": {
+                "render_type": "solid",
+                "solid": {
+                  "color": [
+                    1,
+                    0.0941176488995552,
+                    0.21568627655506134
+                  ]
+                }
+              },
+              "width": 0.07999999821186066,
+              "mode": 0
+            }
+          ],
+          "size": 15,
+          "useLetterColor": true
+        },
+        {
+          "fill": {
+            "content": {
+              "render_type": "solid",
+              "solid": {
+                "color": [
+                  1,
+                  1,
+                  1
+                ]
+              }
+            }
+          },
+          "font": {
+            "id": "7290457161887388219"
+          },
+          "strokes": [
+            {
+              "content": {
+                "render_type": "solid",
+                "solid": {
+                  "color": [
+                    0,
+                    0,
+                    0
+                  ]
+                }
+              },
+              "width": 0.07999999821186066,
+              "mode": 0
+            }
+          ],
+          "size": 15,
+          "useLetterColor": true
+        }
+      ],
+      "base_style": 1,
+      "accent_style": 0,
+      "clip": {
+        "scale": {
+          "x": 0.7208575037651537,
+          "y": 0.7208575037651537
+        },
+        "transform": {
+          "x": 0.84308745845874,
+          "y": 0.12449068064918012
+        },
+        "flip": {}
+      },
+      "vertical": true,
+      "line_spacing": 0.02,
+      "animations": [
+        {
+          "name": "逐字放大",
+          "resource_id": "6908592686781960717",
+          "animation": {
+            "id": "6908592686781960717",
+            "type": "loop",
+            "duration": 1033333,
+            "resource_id": "6908592686781960717",
+            "third_resource_id": "6908592686781960717",
+            "source_platform": 1,
+            "name": "逐字放大",
+            "material_type": "sticker"
+          }
+        }
+      ],
+      "safe_width": 0.94,
+      "safe_height": 0.9,
+      "minimum_scale_ratio": 0.85,
+      "verified": false,
+      "binding_required": true
+    },
+    {
+      "name": "manual-opening_hook-1",
+      "roles": [
+        "opening_hook"
+      ],
+      "family": "manual-general",
+      "styles": [
+        {
+          "fill": {
+            "content": {
+              "texture": {
+                "scale": 0.800000011920929
+              },
+              "render_type": "texture"
+            }
+          },
+          "font": {
+            "id": "6740499317733200388"
+          },
+          "size": 14,
+          "effectStyle": {
+            "id": "7403996884856999194"
+          }
+        },
+        {
+          "fill": {
+            "content": {
+              "render_type": "solid",
+              "solid": {
+                "color": [
+                  1,
+                  1,
+                  1
+                ]
+              }
+            }
+          },
+          "font": {
+            "id": "6740499317733200388"
+          },
+          "strokes": [
+            {
+              "content": {
+                "render_type": "solid",
+                "solid": {
+                  "color": [
+                    0,
+                    0,
+                    0
+                  ]
+                }
+              },
+              "width": 0.07999999821186066,
+              "mode": 0
+            }
+          ],
+          "size": 14,
+          "useLetterColor": true
+        },
+        {
+          "fill": {
+            "content": {
+              "render_type": "gradient",
+              "gradient": {
+                "angle": 39,
+                "color": [
+                  [
+                    1,
+                    0.9254902005195618,
+                    0.5764706134796143
+                  ],
+                  [
+                    1,
+                    0.9215686321258545,
+                    0.560784339904785
+                  ],
+                  [
+                    1,
+                    0.972549021244049,
+                    0.8235294222831726
+                  ]
+                ],
+                "alpha": [
+                  1,
+                  1,
+                  1
+                ],
+                "percent": [
+                  0.14380531013011932,
+                  0.8960176706314087,
+                  0.47787609696388245
+                ],
+                "mode": "character"
+              }
+            }
+          },
+          "font": {
+            "id": "6740499317733200388"
+          },
+          "size": 14,
+          "effectStyle": {
+            "id": "7546423084874599705"
+          }
+        }
+      ],
+      "base_style": 1,
+      "accent_style": 0,
+      "clip": {
+        "scale": {
+          "x": 1.07448622611325,
+          "y": 1.07448622611325
+        },
+        "transform": {
+          "x": 0,
+          "y": -0.3265371429877577
+        },
+        "flip": {}
+      },
+      "vertical": false,
+      "line_spacing": 0.26999999999999996,
+      "animations": [],
+      "safe_width": 0.94,
+      "safe_height": 0.9,
+      "minimum_scale_ratio": 0.85,
+      "verified": false,
+      "binding_required": true,
+      "line_styles": [
+        0,
+        2
+      ],
+      "line_count": 2
+    },
+    {
+      "name": "manual-opening_hook-2",
+      "roles": [
+        "opening_hook"
+      ],
+      "family": "manual-general",
+      "styles": [
+        {
+          "fill": {
+            "content": {
+              "texture": {
+                "scale": 1.2999999523162842
+              },
+              "render_type": "texture"
+            }
+          },
+          "font": {
+            "id": "6740499317733200388"
+          },
+          "size": 12,
+          "effectStyle": {
+            "id": "7565778764605607193"
+          }
+        },
+        {
+          "fill": {
+            "content": {
+              "render_type": "solid",
+              "solid": {
+                "color": [
+                  1,
+                  0.87058824300766,
+                  0
+                ]
+              }
+            }
+          },
+          "font": {
+            "id": "6740499317733200388"
+          },
+          "strokes": [
+            {
+              "content": {
+                "render_type": "solid",
+                "solid": {
+                  "color": [
+                    0,
+                    0,
+                    0
+                  ]
+                }
+              },
+              "width": 0.07999999821186066,
+              "mode": 0
+            }
+          ],
+          "size": 12,
+          "useLetterColor": true
+        },
+        {
+          "fill": {
+            "content": {
+              "render_type": "gradient",
+              "gradient": {
+                "angle": 107,
+                "color": [
+                  [
+                    0.9960784316062927,
+                    1,
+                    0.32549020648002625
+                  ],
+                  [
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    0.9960784316062927,
+                    1,
+                    0.26274511218070984
+                  ]
+                ],
+                "alpha": [
+                  1,
+                  1,
+                  1
+                ],
+                "percent": [
+                  0.7163716554641724,
+                  0.524336278438568,
+                  0.35176992416381836
+                ],
+                "mode": "character"
+              }
+            }
+          },
+          "font": {
+            "id": "6740499317733200388"
+          },
+          "size": 12,
+          "effectStyle": {
+            "id": "7543157780769803582"
+          }
+        }
+      ],
+      "base_style": 1,
+      "accent_style": 0,
+      "clip": {
+        "scale": {
+          "x": 1.2449651446273526,
+          "y": 1.2449651446273526
+        },
+        "transform": {
+          "x": 0,
+          "y": -0.32005554110772994
+        },
+        "flip": {}
+      },
+      "vertical": false,
+      "line_spacing": 0.26999999999999996,
+      "animations": [],
+      "safe_width": 0.94,
+      "safe_height": 0.9,
+      "minimum_scale_ratio": 0.85,
+      "verified": false,
+      "binding_required": true,
+      "line_styles": [
+        0,
+        1,
+        2
+      ],
+      "line_count": 3
+    },
+    {
+      "name": "manual-headline-2",
+      "panel": {
+        "width": 0.7546078796200993,
+        "height": 0.08205795023176518,
+        "x": -0.04929577464788704,
+        "y": 0.8769401323677289,
+        "color": "#b9f5ca"
+      },
+      "roles": [
+        "headline"
+      ],
+      "family": "manual-general",
+      "styles": [
+        {
+          "fill": {
+            "content": {
+              "render_type": "solid",
+              "solid": {
+                "color": [
+                  0.9960784316062927,
+                  1,
+                  0.0117647061124444
+                ]
+              }
+            }
+          },
+          "font": {
+            "id": "7035914068053463565"
+          },
+          "size": 11,
+          "effectStyle": {
+            "id": "7460441811627035929"
+          }
+        }
+      ],
+      "base_style": 0,
+      "accent_style": 0,
+      "clip": {
+        "scale": {
+          "x": 1.2624014408784745,
+          "y": 1.2624014408784745
+        },
+        "transform": {
+          "x": 0,
+          "y": 0.9247524752475248
+        },
+        "flip": {}
+      },
+      "vertical": false,
+      "line_spacing": 0.02,
+      "animations": [],
+      "safe_width": 0.94,
+      "safe_height": 0.9,
+      "minimum_scale_ratio": 0.85,
+      "verified": false,
+      "binding_required": true
+    },
+    {
+      "name": "manual-subheadline-1",
+      "roles": [
+        "subheadline"
+      ],
+      "family": "manual-general",
+      "styles": [
+        {
+          "fill": {
+            "content": {
+              "render_type": "solid",
+              "solid": {
+                "color": [
+                  1,
+                  0.87058824300766,
+                  0
+                ]
+              }
+            }
+          },
+          "font": {
+            "id": "6740499317733200388"
+          },
+          "strokes": [
+            {
+              "content": {
+                "render_type": "solid",
+                "solid": {
+                  "color": [
+                    0,
+                    0,
+                    0
+                  ]
+                }
+              },
+              "width": 0.07999999821186066,
+              "mode": 0
+            }
+          ],
+          "size": 11,
+          "useLetterColor": true
+        },
+        {
+          "fill": {
+            "content": {
+              "render_type": "solid",
+              "solid": {
+                "color": [
+                  0.87058824300766,
+                  0,
+                  0
+                ]
+              }
+            }
+          },
+          "font": {
+            "id": "6740499317733200388"
+          },
+          "size": 11,
+          "effectStyle": {
+            "id": "7482688482754694462"
+          }
+        },
+        {
+          "fill": {
+            "content": {
+              "render_type": "solid",
+              "solid": {
+                "color": [
+                  1,
+                  0.87058824300766,
+                  0
+                ]
+              }
+            }
+          },
+          "font": {
+            "id": "6740499317733200388"
+          },
+          "strokes": [
+            {
+              "content": {
+                "render_type": "solid",
+                "solid": {
+                  "color": [
+                    0,
+                    0,
+                    0
+                  ]
+                }
+              },
+              "width": 0.07999999821186066,
+              "mode": 0
+            }
+          ],
+          "size": 11,
+          "useLetterColor": true
+        }
+      ],
+      "base_style": 0,
+      "accent_style": 1,
+      "clip": {
+        "scale": {
+          "x": 1.0950491489279288,
+          "y": 1.0950491489279288
+        },
+        "transform": {
+          "x": -0.012090325355529783,
+          "y": 0.7861386138613862
+        },
+        "flip": {}
+      },
+      "vertical": false,
+      "line_spacing": 0.02,
+      "animations": [],
+      "safe_width": 0.94,
+      "safe_height": 0.9,
+      "minimum_scale_ratio": 0.85,
+      "verified": false,
+      "binding_required": true
+    }
+  ]
+}

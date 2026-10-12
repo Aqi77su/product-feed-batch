@@ -148,9 +148,10 @@ def estimate_width(text, settings, font=None):
             pass
     padding = float(settings.get('subtitle_effect_padding_px', 12)) * width / 1080
     limit = width * float(settings.get('subtitle_max_width_ratio', .82))
+    cap = settings.get('subtitle_max_cjk_chars')
     return {'width_px': round(pixels + padding * 2, 2), 'safe_width_px': round(limit, 2),
             'cjk_units': round(_cjk_units(text), 3), 'method': method,
-            'fits': pixels + padding * 2 <= limit and _cjk_units(text) <= float(settings.get('subtitle_max_cjk_chars', 13))}
+            'fits': pixels + padding * 2 <= limit and (cap is None or _cjk_units(text) <= float(cap))}
 
 
 def _cue_settings(cue, settings):
@@ -172,11 +173,12 @@ def _layout_estimate(cue, text, settings, font):
             'line_count':len(lines),'lines':measures,'fits':all(x['fits']for x in measures),'method':'explicit_semantic_opening_lines'}
 
 
-def _chunks(text, ends, boundaries, settings, font):
+def _chunks(text, ends, boundaries, settings, font, protected=(), measure=None):
     """Greedy fit, preferring a real phrase boundary in the last half of a line."""
     result = []; start = 0
     while start < len(text):
-        candidates = [e for e in ends if e > start and estimate_width(text[start:e], settings, font)['fits']]
+        candidates = [e for e in ends if e > start and not any(a < e < b for a,b in protected)
+                      and (measure(start,e) if measure else estimate_width(text[start:e], settings, font)['fits'])]
         if not candidates:
             raise CaptionError('A word/token exceeds subtitle safe width; re-segment the transcript or select a smaller verified preset')
         end = max(candidates)
@@ -219,6 +221,7 @@ def prepare_document(data, settings, font=None):
     seen = set(); last_end = -1
     for source in data.get('cues', []):
         cue = copy.deepcopy(source)
+        if data.get('caption_profile'):cue.setdefault('caption_profile',data['caption_profile'])
         cid = str(cue.get('id', ''))
         if not cid or cid in seen:
             raise CaptionError('Missing or duplicate cue id')
@@ -238,16 +241,18 @@ def prepare_document(data, settings, font=None):
         if reason and cue.get('words'):
             warnings.append(f'{cid}: {reason}; word animation disabled')
         measured=_layout_estimate(cue,cleaned,settings,font)
-        if measured['fits']:
+        if measured['fits'] or settings.get('_defer_caption_layout') or settings.get('caption_policy')=='semantic':
             chunks = [(0, len(cleaned))]; approximate = False
         elif opening:
             raise CaptionError(f'{cid}: opening hook line exceeds safe width; explicitly shorten/rewrite its semantic lines')
         elif words:
-            chunks = _chunks(cleaned, [w['char_end'] for w in words], boundaries, settings, font); approximate = False
+            chunks = _chunks(cleaned, [w['char_end'] for w in words], boundaries, settings, font,
+                             [(k['char_start'],k['char_end']) for k in keywords]); approximate = False
         elif settings.get('subtitle_long_cue_policy', 'error') == 'approximate_equal':
             # Numeric values and Latin identifiers are atomic, not split at dots.
             ends = [m.end() for m in re.finditer(r'[A-Za-z0-9]+(?:[.\-—～/%][A-Za-z0-9]+)*|.', cleaned)]
-            chunks = _chunks(cleaned, ends, boundaries, settings, font); approximate = True
+            chunks = _chunks(cleaned, ends, boundaries, settings, font,
+                             [(k['char_start'],k['char_end']) for k in keywords]); approximate = True
             warnings.append(f'{cid}: cue-level equal-time split is approximate, not word alignment')
         else:
             raise CaptionError(f'{cid}: long cue lacks reliable words; align/re-segment it or explicitly allow subtitle_long_cue_policy=approximate_equal')
@@ -411,7 +416,7 @@ def _material_ids(materials):
             for m in rows if isinstance(m, dict) and m.get('id')}
 
 
-def clone_component(component, text, start_ms, end_ms, stage, settings=None):
+def clone_component(component, text, start_ms, end_ms, stage, settings=None, cue=None):
     """Clone a sanitized component and replace every declared text slot.
 
     Protocol: {schema_version:'1.0',segment:{...},materials:{...},
@@ -434,6 +439,10 @@ def clone_component(component, text, start_ms, end_ms, stage, settings=None):
     text_ids = {mid for mid, (k, _) in ids.items() if k == 'texts'}
     if {s.get('material_id') for s in slots} != text_ids or len(slots) != len(text_ids):
         raise CaptionError('All template child texts must have exactly one replacement slot')
+    needs_words = any(a.get('type') == 'caption' for m in materials.get('material_animations', []) for a in m.get('animations', []))
+    words, reliable = _native_words(cue) if cue else ({}, False)
+    if needs_words and not reliable:
+        raise CaptionError('Word-driven template requires current, reliable word timing')
     for mid in text_ids:
         m = ids[mid][1]
         inner = json.loads(m.get('content', '{}'))
@@ -444,8 +453,24 @@ def clone_component(component, text, start_ms, end_ms, stage, settings=None):
             raise CaptionError('Unsupported complex within-slot styles')
         inner['text'] = text; inner['styles'][0]['range'] = [0, _u16(text)]
         m['content'] = json.dumps(inner, ensure_ascii=False)
+        m['line_feed']=0
+        m['force_apply_line_max_width']=False
+        m.pop('fixed_width',None)
         m.pop('base_content', None); m.pop('recognize_text', None); m.pop('recognize_task_id', None)
-        m['words'] = {}; m['current_words'] = {}; m['subtitle_keywords'] = {}
+        m['words'] = copy.deepcopy(words); m['current_words'] = {}; m['subtitle_keywords'] = {}
+    # Remap every ID and every exact matching internal reference, including IDs
+    slot_by_id={s['material_id']:s for s in slots}
+    from native_styles import measure_styles
+    for root in materials.get('text_templates',[]):
+        for child in root.get('text_info_resources',[]):
+            mid=child.get('text_material_id');slot=slot_by_id.get(mid,{})
+            old_width=slot.get('reference_text_width')
+            if old_width and float(old_width)>0:
+                inner=json.loads(ids[mid][1]['content'])
+                measured=measure_styles(text,inner['styles'],{'width':1080,'subtitle_effect_padding_px':0},1)['width_px']
+                attach=child.get('attach_info',{})
+                if attach.get('original_size_width'):
+                    attach['original_size_width']=float(attach['original_size_width'])*measured/float(old_width)
     # Remap every ID and every exact matching internal reference, including IDs
     # embedded in content JSON. External resource IDs remain unchanged.
     mapping = {old: _id() for old in ids}
@@ -478,6 +503,8 @@ def clone_component(component, text, start_ms, end_ms, stage, settings=None):
     def retime(v):
         if isinstance(v, dict):
             for k, vv in list(v.items()):
+                if k == 'words':
+                    continue  # Current cue-relative word times must never be scaled by the old template duration.
                 if k in ('duration', 'start', 'start_time', 'end_time', 'time_offset') and isinstance(vv, (int, float)):
                     v[k] = round(vv*ratio)
                 else: retime(vv)
@@ -506,7 +533,7 @@ def _fit_caption_template(segment, materials, text, settings):
     sx,sy=abs(float(scale.get('x',1))),abs(float(scale.get('y',1)))
     if not sx or not sy:raise CaptionError('Caption component has zero outer scale')
     width=float(settings.get('width',1080));limit=width*float(settings.get('subtitle_max_width_ratio',.82))
-    widest=0;relative_sizes=[]
+    widest=0;tallest=0;relative_sizes=[]
     for child in root.get('text_info_resources',[]):
         _,m=idx.get(child.get('text_material_id'),('',{}));inner=json.loads(m.get('content','{}'))
         styles=inner.get('styles',[])
@@ -517,20 +544,29 @@ def _fit_caption_template(segment, materials, text, settings):
             'subtitle_scale':sx*cx,'subtitle_max_cjk_chars':100000},style.get('font'))
         child_offset=abs(float(attach.get('transform',{}).get('x',0)))*sx
         widest=max(widest,measured['width_px']+child_offset*2)
+        h=float(style.get('size',0))*float(settings.get('subtitle_font_px_per_unit',4))*width/1080*sy*cy*1.25
+        yo=abs(float(attach.get('transform',{}).get('y',0)))*sy
+        tallest=max(tallest,h+yo*2)
         relative_sizes.append(float(style.get('size',0))*sy*cy)
     for child in root.get('non_text_info_resources',[]):
         attach=child.get('attach_info',{});cc=attach.get('clip',{});cs=cc.get('scale',{})
         w=float(attach.get('original_size_width',0))*abs(float(cs.get('x',1)))*sx
         off=abs(float(cc.get('transform',{}).get('x',0)))*sx
         widest=max(widest,w+2*off)
-    ratio=min(1.0,limit/widest)if widest else 1.0
+        h=float(attach.get('original_size_height',0))*abs(float(cs.get('y',1)))*sy
+        yo=abs(float(cc.get('transform',{}).get('y',0)))*sy
+        tallest=max(tallest,h+2*yo)
+    pos=clip.get('transform',{});limit=min(limit,width*max(0,.99-abs(float(pos.get('x',0)))))
+    height_limit=float(settings.get('height',1920))*max(0,.99-abs(float(pos.get('y',0))))
+    ratio=min(1.0,limit/max(1,widest),height_limit/max(1,tallest))
     minimum=float(settings.get('base_font_size',14))*float(settings.get('subtitle_scale',1.15))*float(settings.get('template_min_relative_text_size',1.0))
     if not relative_sizes or min(relative_sizes)*ratio<minimum-.01:
         raise CaptionError('Caption template would make its primary text smaller than base subtitles; choose another verified caption component')
     if ratio<1:
         scale['x']=float(scale.get('x',1))*ratio;scale['y']=float(scale.get('y',1))*ratio
     return {'method':'complete_component_font_metrics_estimate','source_width_px':round(widest,2),
-            'safe_width_px':round(limit,2),'outer_scale_adjustment':round(ratio,6),'native_preview_required':True}
+            'safe_width_px':round(limit,2),'source_height_px':round(tallest,2),'safe_height_px':round(height_limit,2),
+            'outer_scale_adjustment':round(ratio,6),'native_preview_required':True}
 
 
 def validate_requested_resources(cues, settings, catalog, font, stage=lambda p:p):
@@ -540,6 +576,10 @@ def validate_requested_resources(cues, settings, catalog, font, stage=lambda p:p
     staging for a read-only preflight; no random state is read or advanced.
     A bad verified candidate cannot escape validation by losing a random draw.
     """
+    if settings.get('caption_policy')=='semantic':
+        from caption_policy import _validate_catalog,policy
+        _validate_catalog(catalog,settings,cues,policy(settings),font)
+        return []
     warnings=[]
     native_font=_font(font,stage)
     policy=settings.get('missing_effect_policy','error')
@@ -582,7 +622,7 @@ def validate_requested_resources(cues, settings, catalog, font, stage=lambda p:p
                 checked.add(key)
                 try:
                     if path not in loaded:loaded[path]=load_component(path)
-                    seg,added=clone_component(loaded[path],cue['text'],float(cue['start_ms']),float(cue['end_ms']),stage,settings)
+                    seg,added=clone_component(loaded[path],cue['text'],float(cue['start_ms']),float(cue['end_ms']),stage,settings,cue=cue)
                     _fit_caption_template(seg,added,cue['text'],settings)
                     errors=validate_caption_content({'tracks':[{'name':'Subtitles','type':'text','segments':[seg]}],'materials':added})
                     if errors:raise CaptionError('; '.join(errors[:4]))
@@ -606,6 +646,13 @@ def validate_requested_resources(cues, settings, catalog, font, stage=lambda p:p
 
 
 def append_captions(content, cues, settings, catalog, font, stage, rng, offset_ms=0):
+    if settings.get('caption_policy') == 'semantic':
+        from caption_policy import append_semantic_captions
+        return append_semantic_captions(content,cues,settings,catalog,font,stage,rng,offset_ms)
+    return append_legacy_captions(content,cues,settings,catalog,font,stage,rng,offset_ms)
+
+
+def append_legacy_captions(content, cues, settings, catalog, font, stage, rng, offset_ms=0):
     """Append one visible subtitle body per cue; return event metadata for SFX."""
     # Read-only validation precedes all random draws and output mutation. It is
     # intentionally independent of the generation seed and chosen candidates.
@@ -634,7 +681,7 @@ def append_captions(content, cues, settings, catalog, font, stage, rng, offset_m
             try:
                 from component_tools import load_component
                 component = load_component(template['component_path'])
-                seg, added = clone_component(component, cue['text'], start, end, stage, settings)
+                seg, added = clone_component(component, cue['text'], start, end, stage, settings,cue=cue)
                 event['template_layout_estimate']=_fit_caption_template(seg,added,cue['text'],settings)
                 for kind, vals in added.items(): materials.setdefault(kind, []).extend(vals)
                 track['segments'].append(seg)
@@ -750,6 +797,17 @@ def validate_caption_content(content):
                 if path not in font_exists:font_exists[path]=Path(path).is_file()
                 if not font_exists[path]:errors.append(f'{seg}: inner font file missing')
         if cursor!=length:errors.append(f'{seg}: styles do not cover complete caption')
+    def check_words(mid,sid,tr,required=False):
+        mat=idx.get(mid,('',{}))[1];words=mat.get('words')or{}
+        starts,ends,texts=words.get('start_time',[]),words.get('end_time',[]),words.get('text',[])
+        if required and not texts:errors.append(f'{sid}: native caption template missing current words')
+        if starts or ends or texts:
+            if not len(starts)==len(ends)==len(texts):errors.append(f'{sid}: native word arrays have unequal lengths');return
+            if any(not 0<=a<b<=math.ceil(tr.get('duration',0)/1000)for a,b in zip(starts,ends)):
+                errors.append(f'{sid}: native word time outside segment')
+            if any(a<b for a,b in zip(starts[1:],ends[:-1])):errors.append(f'{sid}: native word times overlap')
+            actual=json.loads(mat.get('content','{}')).get('text','')
+            if clean_text(''.join(texts))[0]!=clean_text(actual)[0]:errors.append(f'{sid}: native words differ from current text')
     for t in content.get('tracks',[]):
         if t.get('type')!='text':continue
         if t.get('name') in ('Subtitles','Emphasis'):
@@ -764,6 +822,7 @@ def validate_caption_content(content):
             if s.get('visible',True):rows.append((st,end,sid))
             if kind=='texts':
                 check_text(mid,sid)
+                check_words(mid,sid,tr)
                 words=mat.get('words')or{}
                 starts,ends,wordtexts=words.get('start_time',[]),words.get('end_time',[]),words.get('text',[])
                 if starts or ends or wordtexts:
@@ -779,6 +838,10 @@ def validate_caption_content(content):
                 children=mat.get('text_info_resources',[])
                 if not children:errors.append(f'{sid}: template has no child text')
                 for child in children:check_text(child.get('text_material_id'),sid)
+                component_refs=list(s.get('extra_material_refs',[]))+list(mat.get('extra_material_refs',[]))
+                for child in children:component_refs.extend(child.get('extra_material_refs',[]))
+                needs_words=any(a.get('type')=='caption' for ref in component_refs for a in idx.get(ref,('',{}))[1].get('animations',[]))
+                for child in children:check_words(child.get('text_material_id'),sid,tr,needs_words)
                 def refs(v):
                     if isinstance(v,dict):
                         for k,val in v.items():

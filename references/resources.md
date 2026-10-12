@@ -14,8 +14,10 @@ resources发现结果不是执行白名单。选择本机真实资源；原生�
   ],
   "flowers":[],
   "text_templates":[
-    {"name":"已验证文字组件","role":"caption","component_path":"components/产品名.json","max_chars":13,"verified":true}
-  ]
+    {"name":"已验证文字组件","role":"caption","component_path":"components/产品名.json","verified":true}
+  ],
+  "text_styles":[],
+  "text_animations":[]
 }
 ```
 
@@ -27,7 +29,9 @@ catalog内path/cache_path/component_path和嵌套style资源路径可相对该ca
 2. flowers：同条字幕的字效。需要effect_id、cache_path、**完整style**（字体、纹理/渐变、描边等），不是一个ID即可。style来自已验证材料。
 3. text_templates：完整原生模板组件，包含片段、子文字、贴纸/动画和其它材料依赖；通过component_path引用。模板ID不等于内部花字ID。
 
-默认error策略在请求资源缺失时停止，不让随机抽签决定这次是否碰巧失败。用户接受普通方案后可设missing_effect_policy=plain，或者显式caption_animation_mode=none、inline_emphasis_mode=border、template_probability=0。后者是清楚指定的基础风格，不能报告为完整花字复刻。
+v0.5另有text_styles（完整直接文字样式配方）与text_animations（原生in/out/loop动画）。roles支持caption/headline/subheadline/side_benefit/opening_hook/price_badge；semantic_roles可限定适用语义，family限定兼容包装族。花字旧role=inline兼容caption。模板的max_chars可省略；不是默认13字。
+
+默认error策略在缺少策略所需资源时停止；所有变体在复制媒体前按实际种子预编译。用户接受普通方案后可设missing_effect_policy=plain并报告降级。semantic模式可通过角色策略明确只使用border；旧inline_emphasis_mode仅控制legacy模式。
 
 ## 包内提取工具
 
@@ -37,12 +41,20 @@ catalog内path/cache_path/component_path和嵌套style资源路径可相对该ca
 python scripts/component_tools.py extract --draft D:/任务/明文工程.json --segment-id 实际模板片段ID --out D:/本机组件/模板/component.json
 python scripts/component_tools.py extract-flower --draft D:/任务/明文工程.json --segment-id 实际字幕片段ID --style-index 1 --out D:/本机组件/花字/catalog.json
 python scripts/component_tools.py extract-caption-animation --draft D:/任务/明文工程.json --segment-id 实际字幕片段ID --animation-index 0 --out D:/本机组件/字幕动画/catalog.json
+python scripts/component_tools.py extract-text-style --draft D:/任务/明文工程.json --segment-id 实际标题片段ID --role headline --family manual-general --out D:/本机组件/标题/catalog.json
+python scripts/component_tools.py extract-text-style --draft D:/任务/明文工程.json --segment-id 实际竖排片段ID --role side_benefit --out D:/本机组件/侧栏/catalog.json
+python scripts/component_tools.py extract-text-animation --draft D:/任务/明文工程.json --segment-id 实际字效片段ID --role caption --out D:/本机组件/文字动画/catalog.json
+python scripts/preset_resources.py --catalog D:/任务/resources-selected.json --out D:/任务/resources-bound.json
 python scripts/component_tools.py validate --component D:/本机组件/模板/component.json
 ```
 
 默认把资源复制为提取目录下的相对路径；--reference-resources明确引用原本机缓存。缺资源报错，不能编造路径。多个效果而未指明选择时工具要求具体索引，不随意挑一个。
 
 完整模板只支持primary/mirror同文槽位，所有子文字必须声明并替换；不同文案多槽模板明确拒绝，避免残留旧价格或删错信息。提取时删历史正文/识别词/ID引用中的非依赖用户文本，保留必需样式与布局；遇到不能安全清理的内容报错。
+
+新模板提取保存无文案的reference_text_width，换字时调整子文字框宽度，避免沿用短词固定框造成强制换行。按词模板必须回填当前真实words，不保留历史识别时间。直接样式导出支持分区底色/描边、逐行配方、独立字体、位置和原生文字动画；--base-style-index/--accent-style-index可明确新文字的基础/强调样式映射，--panel-segment-id可一起保留实际底板尺寸和颜色。
+
+内置7套native-style-recipes.json只有已去文案、去路径的样式定义。preset_resources.py按font/effect/animation资源ID绑定本机catalog，未找到的列在.binding-report.json；绑定结果verified=false，原生预览后启用，不能把绑定成功当作渲染通过。
 
 花字/原生动画导出是可合并到resource_catalog的JSON集合。导出结果verified=false；首次先在剪映原生界面选该资源手工改字并播放检查，或检查目标版本可正常播放的已有人工来源，再根据真实记录设置verified和版本。之后用本工具生成两条小样验证整套编排。没有首次资源验证时停止，不提前谎写true破解前置条件；文件存在不等于验证。
 

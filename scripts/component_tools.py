@@ -86,7 +86,7 @@ def extract_flower(draft, segment_id, out_path, *, style_index=None, text_materi
     # for the new phrase. The compiler assigns actual [start,end) bounds later.
     style['range']=[0,len('{{TEXT}}')]
     entry={'name':effect.get('name')or'Selected inline flower','effect_id':rid,'resource_id':rid,
-           'cache_path':fx['path'],'style':style,'role':'inline','available':True,'verified':False}
+           'cache_path':fx['path'],'style':style,'role':'caption','available':True,'verified':False}
     result=_portable_catalog({'schema_version':'1.0','flowers':[entry]},out_path,draft)
     result.update(resource_kind='flowers',effect_id=rid)
     return result
@@ -129,6 +129,65 @@ def _dependencies(value, ids):
     return found
 
 
+def extract_text_style(draft,segment_id,out_path,*,role,family='manual-general',base_style_index=None,accent_style_index=None,panel_segment_id=None):
+    """Export complete direct-text styling without copy, character counts or old word times."""
+    if role not in ('headline','subheadline','side_benefit','opening_hook','caption','price_badge'):
+        raise CaptionError('Unknown native text role')
+    doc,seg,ids=_source_segment(draft,segment_id)
+    kind,mat=ids.get(seg.get('material_id'),('',{}))
+    if kind!='texts':raise CaptionError('Use extract for a complete text template')
+    inner=json.loads(mat['content']);text=inner['text'];originals=inner.get('styles',[])
+    if not originals:raise CaptionError('No native styles')
+    styles=[]
+    def scrub(v):
+        if isinstance(v,dict):return {k:scrub(x) for k,x in v.items() if k not in ('request_id','recognize_task_id','user_id','range')}
+        if isinstance(v,list):return [scrub(x)for x in v]
+        return v
+    for original in originals:styles.append(scrub(original))
+    def plain_black(s):
+        color=s.get('strokes',[{}])[0].get('content',{}).get('solid',{}).get('color',[0,0,0]) if s.get('strokes') else [0,0,0]
+        return not s.get('effectStyle') and sum(color)<.2
+    base=base_style_index if base_style_index is not None else next((i for i,s in enumerate(styles) if plain_black(s)),0)
+    accent=accent_style_index if accent_style_index is not None else next((i for i,s in enumerate(styles) if not plain_black(s)),base)
+    anims=[]
+    for ref in seg.get('extra_material_refs',[]):
+        for node in ids.get(ref,('',{}))[1].get('animations',[]):
+            if node.get('type') in ('in','out','loop'):
+                node=scrub(node);anims.append({'name':node.get('name','Native text animation'),'resource_id':str(node.get('resource_id')or node.get('id')),
+                    'cache_path':node.get('path'),'animation':node})
+    entry={'name':'Native '+role+' style','roles':[role],'family':family,'styles':styles,'base_style':base,'accent_style':accent,
+           'clip':copy.deepcopy(seg.get('clip',{})),'vertical':mat.get('typesetting')==1,
+           'line_spacing':mat.get('line_spacing',.02),'animations':anims,'verified':False,'available':True,
+           'minimum_scale_ratio':.85,'safe_width':.94,'safe_height':.9}
+    if '\n'in text:
+        indices=[];pos=0
+        for line in text.split('\n'):
+            indices.append(max(range(len(originals)),key=lambda i:max(0,min(pos+len(line),originals[i]['range'][1])-max(pos,originals[i]['range'][0]))));pos+=len(line)+1
+        entry['line_styles']=indices
+    if panel_segment_id:
+        _,panel,pids=_source_segment(doc,panel_segment_id);pk,pm=pids.get(panel.get('material_id'),('',{}))
+        if pk!='shapes':raise CaptionError('Panel must reference an actual native shape')
+        canvas=doc.get('canvas_config',{});size=pm.get('shape_size',[]);pos=panel.get('clip',{}).get('transform',{})
+        if len(size)!=2:raise CaptionError('Panel has no rectangular dimensions')
+        entry['panel']={'width':size[0]/canvas['width'],'height':size[1]/canvas['height'],
+                        'x':pos.get('x',0),'y':pos.get('y',.85),'color':pm.get('fill_render_style',{}).get('color',{}).get('solid',{}).get('color')}
+        if not entry['panel']['color']:raise CaptionError('Panel has no solid fill')
+    return _portable_catalog({'schema_version':'1.0','text_styles':[entry]},out_path,draft)
+
+
+def extract_text_animation(draft,segment_id,out_path,*,animation_index=None,role='caption'):
+    doc,seg,ids=_source_segment(draft,segment_id)
+    nodes=[copy.deepcopy(a)for ref in seg.get('extra_material_refs',[])for a in ids.get(ref,('',{}))[1].get('animations',[]) if a.get('type')in('in','out','loop')]
+    if animation_index is None:
+        if len(nodes)!=1:raise CaptionError('Choose --animation-index for the native text animation')
+        animation_index=0
+    if not 0<=animation_index<len(nodes):raise CaptionError('Invalid animation index')
+    node=nodes[animation_index];node.pop('request_id',None)
+    entry={'name':node.get('name','Native text animation'),'roles':[role],'resource_id':str(node.get('resource_id')or node.get('id')),
+           'cache_path':node.get('path'),'animation':node,'available':True,'verified':False}
+    return _portable_catalog({'schema_version':'1.0','text_animations':[entry]},out_path,draft)
+
+
 def _validate_dependency_refs(value, ids):
     errors=[]
     def walk(v):
@@ -166,8 +225,8 @@ def extract_component(draft, segment_id, out_path, *, copy_resources=True):
         pending.update(_dependencies(m,ids)-selected.keys())
     texts={i:m for i,(k,m) in selected.items() if k=='texts'}
     if not texts:raise CaptionError('Template contains no editable child text')
-    originals=[]
-    for material in texts.values():
+    originals=[];reference_widths={}
+    for mid,material in texts.items():
         try:inner=json.loads(material['content'])
         except (KeyError,ValueError):raise CaptionError('Template child has invalid content JSON') from None
         text=inner.get('text','')
@@ -175,6 +234,8 @@ def extract_component(draft, segment_id, out_path, *, copy_resources=True):
         if len(inner.get('styles',[]))!=1:
             raise CaptionError('Unsupported multi-style child slot; requires a reviewed component adapter')
         originals.append(text)
+        from native_styles import measure_styles
+        reference_widths[mid]=measure_styles(text,inner['styles'],{'width':1080,'subtitle_effect_padding_px':0},1)['width_px']
     if len(set(originals))!=1:
         raise CaptionError('Unsupported complex template: child slots contain different historical text')
     for material in texts.values():
@@ -193,7 +254,7 @@ def extract_component(draft, segment_id, out_path, *, copy_resources=True):
     mats={}
     for kind,m in selected.values():mats.setdefault(kind,[]).append(scrub(m))
     component={'schema_version':'1.0','segment':scrub(copy.deepcopy(seg)),'materials':mats,
-               'text_slots':[{'material_id':mid,'role':'primary' if n==0 else 'mirror'}for n,mid in enumerate(texts)],
+                'text_slots':[{'material_id':mid,'role':'primary' if n==0 else 'mirror','reference_text_width':reference_widths[mid]}for n,mid in enumerate(texts)],
                'verified':False,'verification_note':'Extracted structurally; verify appearance in the target Jianying version before enabling.'}
     duration=component['segment'].get('target_timerange',{}).get('duration',0)
     component['segment']['target_timerange']={'start':0,'duration':duration}
@@ -256,6 +317,13 @@ def load_component(path):
 
 def validate_component(path):
     component=load_component(path)
+    if 'text_styles' in component or 'text_animations' in component:
+        from native_styles import recipe_styles,text_animation
+        for recipe in component.get('text_styles',[]):
+            recipe_styles('样式预检',recipe,lambda p:p)
+            for animation in recipe.get('animations',[]):text_animation(animation,1000000,lambda p:p)
+        for animation in component.get('text_animations',[]):text_animation(animation,1000000,lambda p:p)
+        return {'valid':True,'verified':False,'verification_note':'Structural validation only; native preview required.'}
     if 'flowers'in component or 'caption_animations'in component:
         count=0
         for item in component.get('flowers',[]):
@@ -272,7 +340,8 @@ def validate_component(path):
     errors=_validate_dependency_refs(component,_material_ids(component.get('materials',{})))
     if errors:raise CaptionError('; '.join(errors))
     # Identity staging reads existing files, without publishing or changing them.
-    clone_component(component,'组件预览',0,1000,lambda p:p)
+    preview={'text':'组件预览','start_ms':0,'end_ms':1000,'words_timebase':'absolute_ms','words':[{'text':'组件预览','start_ms':0,'end_ms':1000}]}
+    clone_component(component,'组件预览',0,1000,lambda p:p,cue=preview)
     return {'valid':True,'verified':component.get('verified')is True,'component_path':str(Path(path).resolve())}
 
 
@@ -285,11 +354,16 @@ def main(argv=None):
     fl.add_argument('--style-index',type=int);fl.add_argument('--text-material-id')
     an=subs.add_parser('extract-caption-animation');an.add_argument('--draft',required=True);an.add_argument('--segment-id',required=True);an.add_argument('--out',required=True)
     an.add_argument('--animation-index',type=int)
+    tx=subs.add_parser('extract-text-style');tx.add_argument('--draft',required=True);tx.add_argument('--segment-id',required=True);tx.add_argument('--out',required=True)
+    tx.add_argument('--role',required=True);tx.add_argument('--family',default='manual-general');tx.add_argument('--base-style-index',type=int);tx.add_argument('--accent-style-index',type=int);tx.add_argument('--panel-segment-id')
+    ta=subs.add_parser('extract-text-animation');ta.add_argument('--draft',required=True);ta.add_argument('--segment-id',required=True);ta.add_argument('--out',required=True);ta.add_argument('--animation-index',type=int);ta.add_argument('--role',default='caption')
     val=subs.add_parser('validate');val.add_argument('--component',required=True)
     args=parser.parse_args(argv)
     if args.command=='extract':result=extract_component(args.draft,args.segment_id,args.out,copy_resources=not args.reference_resources)
     elif args.command=='extract-flower':result=extract_flower(args.draft,args.segment_id,args.out,style_index=args.style_index,text_material_id=args.text_material_id)
     elif args.command=='extract-caption-animation':result=extract_caption_animation(args.draft,args.segment_id,args.out,animation_index=args.animation_index)
+    elif args.command=='extract-text-style':result=extract_text_style(args.draft,args.segment_id,args.out,role=args.role,family=args.family,base_style_index=args.base_style_index,accent_style_index=args.accent_style_index,panel_segment_id=args.panel_segment_id)
+    elif args.command=='extract-text-animation':result=extract_text_animation(args.draft,args.segment_id,args.out,animation_index=args.animation_index,role=args.role)
     else:result=validate_component(args.component)
     print(json.dumps(result,ensure_ascii=False))
 
