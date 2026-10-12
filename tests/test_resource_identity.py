@@ -125,4 +125,27 @@ class ResourceIdentityTests(unittest.TestCase):
         self.assertEqual(result['font_bindings'][0]['method'],'observed_resource_id')
         self.assertFalse(out['text_styles'][0]['verified'])
 
+    def test_fonts_are_scanned_even_after_twenty_thousand_effect_entries(self):
+        user=self.root/'user';base=user/'Cache/effect';base.mkdir(parents=True)
+        font=base/'7290457161887388219/阳华体.otf';font.parent.mkdir();mini_font(font,[(1,'阳华体')])
+        original_walk=os.walk
+        def walk(root,*args,**kwargs):
+            if Path(root)==base:
+                yield str(base),[],['noise'+str(i)+'.json'for i in range(20002)]
+            yield from original_walk(root,*args,**kwargs)
+        with patch.object(batch,'discover',return_value={'user_data':str(user),'draft_roots':[]}),patch.dict(os.environ,{'WINDIR':str(self.root/'none')}),patch('os.walk',side_effect=walk):
+            catalog=batch.resources()
+        self.assertEqual(catalog['fonts'][0]['resource_id'],'7290457161887388219')
+        self.assertEqual(catalog['scan_errors'],[])
+        self.assertIsNone(catalog['font_scan'][0]['entry_limit'])
+        row=next(r for r in catalog['preset_font_inventory']if r['resource_id']=='7290457161887388219')
+        self.assertTrue(row['found_paths']);self.assertTrue(row['cache_directories'])
+
+    def test_all_reference_font_dirs_direct_and_nested_are_collected(self):
+        user=self.root/'user';fonts={'7410300778990015027':'三极榜楷简体','7290457161887388219':'阳华体','6740499317733200388':'俪金黑','7035914068053463565':'喜鹊招牌体'}
+        for i,(rid,name)in enumerate(fonts.items()):
+            p=user/'Cache/effect'/rid/('hash/'+name+'.ttf'if i%2 else name+'.otf');p.parent.mkdir(parents=True);mini_font(p,[(1,name)])
+        with patch.object(batch,'discover',return_value={'user_data':str(user),'draft_roots':[]}),patch.dict(os.environ,{'WINDIR':str(self.root/'none')}):catalog=batch.resources()
+        self.assertEqual({f['resource_id']for f in catalog['fonts']},set(fonts));self.assertEqual(len(catalog['fonts']),4)
+
 if __name__=='__main__':unittest.main()

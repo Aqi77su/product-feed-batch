@@ -240,9 +240,29 @@ def setup(approved):
 def resources():
     from font_identity import collect_font_records,merge_fonts,enrich_font,font_record
     d = discover(); user = Path(d['user_data']); found = {'music': [], 'sfx': [], 'audio_candidates': [], 'fonts': [], 'effects': []}
-    missing_records = []; encrypted = 0
-    for category, sub, exts in [('audio_candidates', 'Cache/music', AUDIO), ('fonts', 'Cache/effect', {'.ttf', '.otf', '.ttc'}),
-                               ('fonts', 'Cache/font', {'.ttf', '.otf', '.ttc'})]:
+    missing_records = []; encrypted = 0;scan_errors=[];cache_font_scan=[]
+    identities=read(ROOT/'presets/font-identities.json')['fonts']
+    # Scan font files without a generic effect-entry cap. A large sticker cache
+    # must not hide the last font, nor stop an explicit preset directory lookup.
+    seen_fonts=set()
+    for sub in ('Cache/effect','Cache/font'):
+        base=user/sub
+        if not base.is_dir():continue
+        def scan_font_directory(root):
+            def onerror(error):scan_errors.append({'path':str(error.filename),'error':str(error)})
+            for directory,_,files in os.walk(root,onerror=onerror,followlinks=False):
+                for name in files:
+                    f=Path(directory)/name
+                    if f.suffix.lower() not in ('.ttf','.otf','.ttc'):continue
+                    key=str(f.resolve()).casefold()
+                    if key not in seen_fonts:
+                        seen_fonts.add(key);found['fonts'].append(font_record(f,source='cache'))
+        for rid in identities:
+            target=base/rid
+            if target.is_dir():scan_font_directory(target)
+        scan_font_directory(base)
+        cache_font_scan.append({'root':str(base),'complete':not any(str(x['path']).startswith(str(base))for x in scan_errors),'entry_limit':None})
+    for category, sub, exts in [('audio_candidates', 'Cache/music', AUDIO)]:
         base = user / sub
         if not base.exists(): continue
         for i, f in enumerate(base.rglob('*')):
@@ -303,7 +323,12 @@ def resources():
                 if not font.get('font_names'):font['name']=pil_name
             except Exception: pass
     except ImportError: pass
+    preset_fonts=[{'resource_id':rid,'expected_names':item['names'],
+        'found_paths':[f['path']for f in found['fonts']if rid in f.get('resource_ids',[]) or rid==f.get('resource_id')],
+        'cache_directories':[str(user/sub/rid)for sub in ('Cache/effect','Cache/font')if(user/sub/rid).is_dir()]}
+        for rid,item in identities.items()]
     return {**found, 'missing_records': missing_records, 'unreadable_recent_drafts': encrypted,
+            'font_scan':cache_font_scan,'scan_errors':scan_errors,'preset_font_inventory':preset_fonts,
             'note': '缓存存在不等于商用授权；效果必须另行验证，不自动进入随机集合'}
 
 
@@ -434,7 +459,7 @@ def inventory(job):
         def canonical(value): return ''.join(c.lower() for c in value if c.isalnum())
         for key in ('music','fonts'):
             wanted=[canonical(x) for x in (settings['preferred_fonts'] if key == 'fonts' else preferred[key])]
-            catalog[key]=[x for x in discovered[key] if any(name in canonical(x['name']) or name in canonical(Path(x['path']).stem) for name in wanted)]
+            catalog[key]=[x for x in discovered[key] if any(name in canonical(' '.join([x['name'],Path(x['path']).stem,*x.get('aliases',[]),*x.get('font_names',[])])) for name in wanted)]
         if not catalog['fonts']:
             raise ValueError('默认得意黑/俪金黑未定位；请确认安装字体或指定替代 catalog，不从全字体池随机')
     for k in ('music', 'fonts', 'sfx'):
